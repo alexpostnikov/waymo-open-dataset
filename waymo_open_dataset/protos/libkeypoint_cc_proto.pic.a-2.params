@@ -1,0 +1,3 @@
+rcsD
+bazel-out/k8-opt/bin/waymo_open_dataset/protos/libkeypoint_cc_proto.pic.a
+bazel-out/k8-opt/bin/waymo_open_dataset/protos/_objs/keypoint_cc_proto/keypoint.pb.pic.o

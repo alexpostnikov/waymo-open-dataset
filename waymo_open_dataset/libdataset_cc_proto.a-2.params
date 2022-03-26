@@ -1,0 +1,3 @@
+rcsD
+bazel-out/k8-opt/bin/waymo_open_dataset/libdataset_cc_proto.a
+bazel-out/k8-opt/bin/waymo_open_dataset/_objs/dataset_cc_proto/dataset.pb.o

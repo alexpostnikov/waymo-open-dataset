@@ -1,0 +1,3 @@
+rcsD
+bazel-out/k8-opt/bin/waymo_open_dataset/common/libstatus.pic.a
+bazel-out/k8-opt/bin/waymo_open_dataset/common/_objs/status/status.pic.o

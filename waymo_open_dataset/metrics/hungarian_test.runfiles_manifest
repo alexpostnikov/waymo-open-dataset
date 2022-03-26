@@ -1,0 +1,5 @@
+__main__/_solib_k8/libexternal_Scom_Ugoogle_Uglog_Slibglog.so /home/robot/.cache/bazel/_bazel_robot/34c01d6a337f24a02db99feeb06ea192/execroot/__main__/bazel-out/k8-opt/bin/_solib_k8/libexternal_Scom_Ugoogle_Uglog_Slibglog.so
+__main__/_solib_k8/libexternal_Scom_Ugoogle_Ugoogletest_Slibgtest.so /home/robot/.cache/bazel/_bazel_robot/34c01d6a337f24a02db99feeb06ea192/execroot/__main__/bazel-out/k8-opt/bin/_solib_k8/libexternal_Scom_Ugoogle_Ugoogletest_Slibgtest.so
+__main__/_solib_k8/libexternal_Scom_Ugoogle_Ugoogletest_Slibgtest_Umain.so /home/robot/.cache/bazel/_bazel_robot/34c01d6a337f24a02db99feeb06ea192/execroot/__main__/bazel-out/k8-opt/bin/_solib_k8/libexternal_Scom_Ugoogle_Ugoogletest_Slibgtest_Umain.so
+__main__/_solib_k8/libwaymo_Uopen_Udataset_Smetrics_Slibhungarian.so /home/robot/.cache/bazel/_bazel_robot/34c01d6a337f24a02db99feeb06ea192/execroot/__main__/bazel-out/k8-opt/bin/_solib_k8/libwaymo_Uopen_Udataset_Smetrics_Slibhungarian.so
+__main__/waymo_open_dataset/metrics/hungarian_test /home/robot/.cache/bazel/_bazel_robot/34c01d6a337f24a02db99feeb06ea192/execroot/__main__/bazel-out/k8-opt/bin/waymo_open_dataset/metrics/hungarian_test

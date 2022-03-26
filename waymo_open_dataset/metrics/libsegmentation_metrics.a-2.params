@@ -1,0 +1,3 @@
+rcsD
+bazel-out/k8-opt/bin/waymo_open_dataset/metrics/libsegmentation_metrics.a
+bazel-out/k8-opt/bin/waymo_open_dataset/metrics/_objs/segmentation_metrics/segmentation_metrics.o

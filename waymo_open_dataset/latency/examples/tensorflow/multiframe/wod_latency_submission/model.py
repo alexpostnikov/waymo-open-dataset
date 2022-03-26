@@ -19,6 +19,8 @@ import tensorflow as tf
 
 # Request the top range image and vehicle pose for each of the 3 most current
 # frames.
+import tutorial.test.models
+
 DATA_FIELDS = [
     'TOP_RANGE_IMAGE_FIRST_RETURN',
     'TOP_RANGE_IMAGE_FIRST_RETURN_1',
@@ -126,7 +128,7 @@ def get_model():
   # (1, 50, 7)
   boxes = tf.keras.layers.Concatenate()(box_feats)
 
-  return tf.keras.Model(inputs=inp, outputs={'boxes': boxes, 'scores': scores})
+  return tutorial.test.models.Model(inputs=inp, outputs={'boxes': boxes, 'scores': scores})
 
 
 def run_model(**kwargs):

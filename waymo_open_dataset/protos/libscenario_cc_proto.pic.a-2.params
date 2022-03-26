@@ -1,0 +1,3 @@
+rcsD
+bazel-out/k8-opt/bin/waymo_open_dataset/protos/libscenario_cc_proto.pic.a
+bazel-out/k8-opt/bin/waymo_open_dataset/protos/_objs/scenario_cc_proto/scenario.pb.pic.o

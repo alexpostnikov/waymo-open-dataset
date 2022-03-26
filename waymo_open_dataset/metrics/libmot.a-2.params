@@ -1,0 +1,3 @@
+rcsD
+bazel-out/k8-opt/bin/waymo_open_dataset/metrics/libmot.a
+bazel-out/k8-opt/bin/waymo_open_dataset/metrics/_objs/mot/mot.o

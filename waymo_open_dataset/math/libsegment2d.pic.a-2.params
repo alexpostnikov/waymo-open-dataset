@@ -1,0 +1,3 @@
+rcsD
+bazel-out/k8-opt/bin/waymo_open_dataset/math/libsegment2d.pic.a
+bazel-out/k8-opt/bin/waymo_open_dataset/math/_objs/segment2d/segment2d.pic.o

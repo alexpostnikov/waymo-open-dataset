@@ -1,0 +1,7 @@
+__main__/external/bazel_tools/tools/python/py3wrapper.sh /home/robot/.cache/bazel/_bazel_robot/34c01d6a337f24a02db99feeb06ea192/execroot/__main__/bazel-out/k8-opt/bin/external/bazel_tools/tools/python/py3wrapper.sh
+__main__/waymo_open_dataset/__init__.py 
+__main__/waymo_open_dataset/utils/__init__.py 
+__main__/waymo_open_dataset/utils/transform_utils.py /media/robot/hdd/waymo-open-dataset-repo/waymo_open_dataset/utils/transform_utils.py
+__main__/waymo_open_dataset/utils/transform_utils_test /home/robot/.cache/bazel/_bazel_robot/34c01d6a337f24a02db99feeb06ea192/execroot/__main__/bazel-out/k8-opt/bin/waymo_open_dataset/utils/transform_utils_test
+__main__/waymo_open_dataset/utils/transform_utils_test.py /media/robot/hdd/waymo-open-dataset-repo/waymo_open_dataset/utils/transform_utils_test.py
+bazel_tools/tools/python/py3wrapper.sh /home/robot/.cache/bazel/_bazel_robot/34c01d6a337f24a02db99feeb06ea192/execroot/__main__/bazel-out/k8-opt/bin/external/bazel_tools/tools/python/py3wrapper.sh

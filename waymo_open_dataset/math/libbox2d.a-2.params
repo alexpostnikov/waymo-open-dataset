@@ -1,0 +1,3 @@
+rcsD
+bazel-out/k8-opt/bin/waymo_open_dataset/math/libbox2d.a
+bazel-out/k8-opt/bin/waymo_open_dataset/math/_objs/box2d/box2d.o

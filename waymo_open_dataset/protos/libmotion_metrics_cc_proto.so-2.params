@@ -1,0 +1,13 @@
+-shared
+-o
+bazel-out/k8-opt/bin/waymo_open_dataset/protos/libmotion_metrics_cc_proto.so
+-fuse-ld=gold
+-Wl,-no-as-needed
+-Wl,-z,relro,-z,now
+-B/usr/bin
+-pass-exit-codes
+-Wl,--gc-sections
+bazel-out/k8-opt/bin/waymo_open_dataset/protos/_objs/motion_metrics_cc_proto/motion_metrics.pb.pic.o
+-lrt -lm
+-lstdc++
+-lm

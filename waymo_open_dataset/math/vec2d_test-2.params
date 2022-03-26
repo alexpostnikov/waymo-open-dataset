@@ -1,0 +1,26 @@
+-o
+bazel-out/k8-opt/bin/waymo_open_dataset/math/vec2d_test
+-Wl,-rpath,$ORIGIN/../../_solib_k8/
+-Lbazel-out/k8-opt/bin/_solib_k8
+-fuse-ld=gold
+-Wl,-no-as-needed
+-Wl,-z,relro,-z,now
+-B/usr/bin
+-pass-exit-codes
+-Wl,--gc-sections
+bazel-out/k8-opt/bin/waymo_open_dataset/math/_objs/vec2d_test/vec2d_test.o
+-lexternal_Scom_Ugoogle_Uabsl_Sabsl_Sstrings_Slibstrings
+-lexternal_Scom_Ugoogle_Uabsl_Sabsl_Sstrings_Slibinternal
+-lexternal_Scom_Ugoogle_Uabsl_Sabsl_Sbase_Slibbase
+-lexternal_Scom_Ugoogle_Uabsl_Sabsl_Sbase_Slibspinlock_Uwait
+-lexternal_Scom_Ugoogle_Uabsl_Sabsl_Sbase_Slibthrow_Udelegate
+-lexternal_Scom_Ugoogle_Uabsl_Sabsl_Sbase_Slibraw_Ulogging_Uinternal
+-lexternal_Scom_Ugoogle_Uabsl_Sabsl_Sbase_Sliblog_Useverity
+-lexternal_Scom_Ugoogle_Uabsl_Sabsl_Snumeric_Slibint128
+-lexternal_Scom_Ugoogle_Ugoogletest_Slibgtest_Umain
+-lexternal_Scom_Ugoogle_Ugoogletest_Slibgtest
+-pthread
+-pthread
+-lrt -lm
+-lstdc++
+-lm

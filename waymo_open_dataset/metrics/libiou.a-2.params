@@ -1,0 +1,3 @@
+rcsD
+bazel-out/k8-opt/bin/waymo_open_dataset/metrics/libiou.a
+bazel-out/k8-opt/bin/waymo_open_dataset/metrics/_objs/iou/iou.o

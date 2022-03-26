@@ -1,0 +1,3 @@
+rcsD
+bazel-out/k8-opt/bin/waymo_open_dataset/math/libexactfloat.pic.a
+bazel-out/k8-opt/bin/waymo_open_dataset/math/_objs/exactfloat/exactfloat.pic.o

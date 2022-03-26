@@ -1,0 +1,3 @@
+rcsD
+bazel-out/k8-opt/bin/waymo_open_dataset/metrics/libdetection_metrics.a
+bazel-out/k8-opt/bin/waymo_open_dataset/metrics/_objs/detection_metrics/detection_metrics.o

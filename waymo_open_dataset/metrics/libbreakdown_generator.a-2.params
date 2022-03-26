@@ -1,0 +1,3 @@
+rcsD
+bazel-out/k8-opt/bin/waymo_open_dataset/metrics/libbreakdown_generator.a
+bazel-out/k8-opt/bin/waymo_open_dataset/metrics/_objs/breakdown_generator/breakdown_generator.o

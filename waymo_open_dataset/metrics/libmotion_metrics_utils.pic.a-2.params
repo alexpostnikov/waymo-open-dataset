@@ -1,0 +1,3 @@
+rcsD
+bazel-out/k8-opt/bin/waymo_open_dataset/metrics/libmotion_metrics_utils.pic.a
+bazel-out/k8-opt/bin/waymo_open_dataset/metrics/_objs/motion_metrics_utils/motion_metrics_utils.pic.o

@@ -1,0 +1,3 @@
+rcsD
+bazel-out/k8-opt/bin/waymo_open_dataset/liblabel_cc_proto.a
+bazel-out/k8-opt/bin/waymo_open_dataset/_objs/label_cc_proto/label.pb.o

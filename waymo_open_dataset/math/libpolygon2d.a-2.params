@@ -1,0 +1,3 @@
+rcsD
+bazel-out/k8-opt/bin/waymo_open_dataset/math/libpolygon2d.a
+bazel-out/k8-opt/bin/waymo_open_dataset/math/_objs/polygon2d/polygon2d.o
