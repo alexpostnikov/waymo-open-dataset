@@ -18,8 +18,12 @@ class Model(nn.Module):
         self.lin_fut = nn.Linear(88, 160)
         self.dec = nn.Sequential(nn.Linear((24 + 160), 160),
                                  nn.ReLU(),
-                                 nn.Linear(160, 160))
+                                 nn.Linear(160, 64))
 
+        self.dec_f = nn.Sequential(nn.Linear(22+64, 64),
+                                 nn.ReLU(),
+                                 nn.BatchNorm1d(128),
+                                 nn.Linear(64, 160))
     def forward(self, data):
         bs = data["roadgraph_samples/xyz"].shape[0]
 
@@ -51,12 +55,18 @@ class Model(nn.Module):
         out_3 = out_3.permute(1, 0, 2).reshape(bs, 128, -1)  # bs, 128, 80 ,2
 
         fin_input = torch.cat([state_emb, out_3], -1)
-        out = self.dec(fin_input).reshape(-1, 128, 80, 2)
+        out_dec = self.dec(fin_input)#.reshape(-1, 128, 80, 2)
+        cur = torch.cat(
+            [data["state/current/x"].reshape(-1, 1, 128, 1), data["state/current/y"].reshape(-1, 1, 128, 1)], -1)
+        past = torch.cat([data["state/past/x"].reshape(-1, 128, 10, 1), data["state/past/y"].reshape(-1, 128, 10, 1)],
+                         -1).permute(0, 2, 1, 3)
+        state = (torch.cat([cur, past], 1) - cur).permute(0, 2, 1, 3).reshape(-1, 128, 11 * 2).cuda()
+        out = self.dec_f(torch.cat([out_dec, state], dim=2))
         # base_speed = torch.cat([data['state/current/velocity_x'].reshape(bs, 128, 1),
         #                         data['state/current/velocity_y'].reshape(bs, 128, 1)], 2).cuda() / 100.
         # base_speed = base_speed.reshape(bs,128,1,2).repeat(1,1,80,1).cumsum(2)#.reshape(bs,128,1,2)
         # out += base_speed
-        return out
+        return out.reshape(-1,128,80,2)
 
     def get_mask(self, data):
         mask = data["state/tracks_to_predict"]

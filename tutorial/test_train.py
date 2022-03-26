@@ -7,7 +7,7 @@
 
 import tensorflow as tf
 
-from test.models import Model
+from test.models import Model, SimplModel
 from test.train import train
 from test.visualize import vis_cur_and_fut
 from test.train import get_speed_ade_with_mask, get_ade_from_pred_speed_with_mask
@@ -214,6 +214,7 @@ import torch.optim as optim
 
 device = "cuda"
 net = Model()
+# net = SimplModel()
 optimizer = optim.Adam(net.parameters(), lr=3e-4)
 net = net.to(device)
 
