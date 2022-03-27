@@ -7,8 +7,8 @@
 
 import tensorflow as tf
 
-from test.models import Model, SimplModel
-from test.train import train
+from test.models import Model, SimplModel, MultyModel
+from test.train import train, train_multymodal
 from test.visualize import vis_cur_and_fut
 from test.train import get_speed_ade_with_mask, get_ade_from_pred_speed_with_mask
 
@@ -25,6 +25,7 @@ import torch.utils.data
 import matplotlib.pyplot as plt
 import numpy as np
 
+import wandb
 # torch.use_deterministic_algorithms(True)
 import random
 random.seed(0)
@@ -205,7 +206,14 @@ class CustomImageDataset(torch.utils.data.IterableDataset):
         raise StopIteration
 
 
-batch_size = 8
+wandb.init(project="waymo22", entity="aleksey-postnikov")
+wandb.config = {
+  "learning_rate": 0.0003,
+  "epochs": 10,
+  "batch_size": 4
+}
+
+batch_size = wandb.config["batch_size"]
 
 tfrecord_path = "/media/robot/hdd/waymo_dataset/tf_example/training/"
 dataset = CustomImageDataset(tfrecord_path, context_description)
@@ -213,16 +221,17 @@ loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size)
 import torch.optim as optim
 
 device = "cuda"
-net = Model()
+net = MultyModel()
 # net = SimplModel()
-optimizer = optim.Adam(net.parameters(), lr=3e-4)
+optimizer = optim.Adam(net.parameters(), lr=wandb.config["learning_rate"])
 net = net.to(device)
 
 data = next(iter(dataset))
 
-# images = visualize_all_agents_smooth(data)
 
+from test.models import Checkpointer
 
+checkpointer = Checkpointer(model=net, torch_seed=0, ckpt_dir="./checkpoints/", checkpoint_frequency=1)
 def overfit_test(model, loader, optimizer):
     losses = torch.rand(0)
     pbar = tqdm(loader)
@@ -252,6 +261,7 @@ def overfit_test(model, loader, optimizer):
 
 
 # overfit_test(net, loader, optimizer)
-train(net, loader, optimizer)
+
+train_multymodal(net, loader, optimizer, checkpointer=checkpointer, num_ep=wandb.config["epochs"], logger=wandb)
 print("done")
 print("done")
