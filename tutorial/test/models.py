@@ -3,6 +3,7 @@ from torch import nn as nn
 import os
 from einops import rearrange, repeat
 from numpy import pi
+import torch.nn.functional
 
 def fourier_encode(x, max_freq, num_bands = 4):
     x = x.unsqueeze(-1)
@@ -21,24 +22,33 @@ class MultyModel(nn.Module):
         super().__init__()
         self.tr = nn.Transformer(d_model=500+25, nhead=5, num_encoder_layers=4)  # .cuda()
         self.lin_xyz = nn.Linear(3, 2)  # .cuda()
-        self.lin_xyz_post = nn.Linear(self.tr.d_model, 64)
+        # self.lin_xyz_post = nn.Linear(self.tr.d_model, 64)
+        self.lin_xyz_post = nn.Sequential(nn.Linear(self.tr.d_model, 128),
+                      nn.ReLU(),
+                      nn.LayerNorm(128),
+                      nn.Linear(128, 64))
         self.hist_tr = nn.Transformer(d_model=24+9, nhead=3, num_encoder_layers=4)  # .cuda()
+        self.hist_tr_tgt = nn.Parameter(torch.rand(128, self.hist_tr.d_model).cuda(), requires_grad=True)
         # self.lin_hist = nn.Linear(22, 24)  # .cuda()
         self.lin_hist = nn.Sequential(nn.Linear(22, 64),
                                       nn.ReLU(),
-                                      nn.BatchNorm1d(128),
+                                      nn.LayerNorm(64),
                                       nn.Linear(64, 24))
         self.future_tr = nn.Transformer(d_model=256, nhead=16, num_encoder_layers=4)  # .cuda()
         self.lin_fut = nn.Linear(97, 256)
         self.dec = nn.Sequential(nn.Linear(289, 512),
                                  nn.ReLU(),
+                                 nn.LayerNorm(512),
                                  nn.Linear(512, 256))
 
         self.dec_f = nn.Sequential(nn.Linear(22+256, 512),
                                  nn.ReLU(),
-                                 nn.BatchNorm1d(128),
+                                 nn.LayerNorm(512),
                                  nn.Linear(512, (160+1)*6))
         self.fourier_encode_data = True
+        self.tgt_xyz = nn.Parameter(torch.rand(128, self.tr.d_model).cuda(), requires_grad=True)
+        self.tgt_fut = nn.Parameter(torch.rand(128, 256).cuda(), requires_grad=True)
+
 
     def forward(self, data):
         bs = data["roadgraph_samples/xyz"].shape[0]
@@ -51,52 +61,51 @@ class MultyModel(nn.Module):
         if self.fourier_encode_data:
             # calculate fourier encoded positions in the range of [-1, 1], for all axis
 
-            axis_pos = list(map(lambda size: torch.linspace(-1., 1., steps = size, device = "cuda"), src.shape[1:2]))
-            pos = torch.stack(torch.meshgrid(*axis_pos), dim = -1)
+            axis_pos = list(map(lambda size: torch.linspace(-1., 1., steps=size, device="cuda"), src.shape[1:2]))
+            pos = torch.stack(torch.meshgrid(*axis_pos), dim=-1)
             enc_pos = fourier_encode(pos, 10, 12)
             enc_pos = rearrange(enc_pos, '... n d -> ... (n d)')
             enc_pos = repeat(enc_pos, '... -> b ...', b=bs)
 
-            src = torch.cat((src, enc_pos.to(src.device)), dim = -1)
+            src = torch.cat((src, enc_pos.to(src.device)), dim=-1)
 
-        tgt = torch.rand(bs, 128, self.tr.d_model).cuda()
+        tgt = self.tgt_xyz.reshape(1, 128, -1).repeat(bs, 1, 1)
+
         out_0 = self.tr(src.permute(1, 0, 2), tgt.permute(1, 0, 2)).permute(1, 0, 2)
         out_0 = self.lin_xyz_post(out_0)
         cur = torch.cat(
-            [data["state/current/x"].reshape(-1, 1, 128, 1), data["state/current/y"].reshape(-1, 1, 128, 1)], -1)
-        # cur = torch.cat(
-        #     [data["state/current/x"].reshape(-1, 128, 1,  1), data["state/current/y"].reshape(-1, 128,1,  1)], -1).permute(0,2,1,3)
-        past = torch.cat([data["state/past/x"].reshape(-1, 128, 10, 1), data["state/past/y"].reshape(-1, 128, 10, 1)],
-                         -1).permute(0, 2, 1, 3)
-        # state = torch.cat([cur, past - cur], 1).permute(0, 2, 1, 3).reshape(-1, 128, 11 * 2).cuda()
-        state = (torch.cat([cur, past], 1).permute(0, 2, 1, 3).cuda() - xyz_mean[:, :, :2].reshape(bs, 1, 1, 2)).reshape(-1, 128, 11 * 2)
+            [data["state/current/x"].reshape(-1, 128, 1, 1), data["state/current/y"].reshape(-1, 128, 1, 1)], -1)
 
+        past = torch.cat([data["state/past/x"].reshape(-1, 128, 10, 1), data["state/past/y"].reshape(-1, 128, 10, 1)],
+                         -1)
+        # state = torch.cat([cur, past - cur], 1).permute(0, 2, 1, 3).reshape(-1, 128, 11 * 2).cuda()
+        state = (torch.cat([cur, past], 2).cuda() - xyz_mean[:, :, :2].reshape(bs, 1, 1, 2))
+        state = rearrange(state, "bs nump time datadim -> bs nump (time datadim) ")  #.reshape(-1, 128, 11 * 2)
         state_emb = self.lin_hist(state)
         if self.fourier_encode_data:
             # calculate fourier encoded positions in the range of [-1, 1], for all axis
-
-            axis_pos = list(map(lambda size: torch.linspace(-1., 1., steps = size, device = "cuda"), state_emb.shape[1:-1]))
+            axis_pos = list(map(lambda size: torch.linspace(-1., 1., steps=size, device="cuda"), state_emb.shape[1:-1]))
             pos = torch.stack(torch.meshgrid(*axis_pos), dim = -1)
             enc_pos = fourier_encode(pos, 12)
             enc_pos = rearrange(enc_pos, '... n d -> ... (n d)')
             enc_pos = repeat(enc_pos, '... -> b ...', b=bs)
+            state_emb = torch.cat((state_emb, enc_pos.to(src.device)), dim=-1)
 
-            state_emb = torch.cat((state_emb, enc_pos.to(src.device)), dim = -1)
-
-
-        tgt = torch.rand(bs, 128, self.hist_tr.d_model).cuda()
-        out_1 = self.hist_tr(state_emb.permute(1, 0, 2), tgt.permute(1, 0, 2)).permute(1, 0, 2)
+        tgt_hist = self.hist_tr_tgt.reshape(1, 128, -1).repeat(bs, 1, 1)
+        out_1 = self.hist_tr(state_emb.permute(1, 0, 2), tgt_hist.permute(1, 0, 2)).permute(1, 0, 2)
         out_2 = self.lin_fut(torch.cat([out_0, out_1], -1))
         # future_tgt = cur.reshape(-1, 1, 128, 2).repeat(1, 80, 1, 1).permute(0, 2, 1, 3).cuda()
         # future_tgt -= xyz_mean[:, :, :2].reshape(bs, 1, 1, 2)
         # future_tgt = future_tgt.reshape(-1, 128, 160)
-        future_tgt = torch.rand(bs, 128, 256).cuda()
+        # future_tgt = torch.rand(bs, 128, 256).cuda()
+        future_tgt = self.tgt_fut.reshape(1, 128, -1).repeat(bs, 1, 1)
+
         # cur.reshape(-1, 1, 128, 2).repeat(1, 80, 1, 1).permute(0, 2, 1, 3).reshape(-1, 128, 160).cuda()
         out_3 = self.future_tr(out_2.permute(1, 0, 2), future_tgt.permute(1, 0, 2))
         out_3 = out_3.permute(1, 0, 2).reshape(bs, 128, -1)  # bs, 128, 80 ,2
 
         fin_input = torch.cat([state_emb, out_3], -1)
-        out_dec = self.dec(fin_input)#.reshape(-1, 128, 80, 2)
+        out_dec = self.dec(fin_input) #.reshape(-1, 128, 80, 2)
         cur = torch.cat(
             [data["state/current/x"].reshape(-1, 1, 128, 1), data["state/current/y"].reshape(-1, 1, 128, 1)], -1)
         past = torch.cat([data["state/past/x"].reshape(-1, 128, 10, 1), data["state/past/y"].reshape(-1, 128, 10, 1)],
@@ -105,7 +114,9 @@ class MultyModel(nn.Module):
         out = self.dec_f(torch.cat([out_dec, state], dim=2))
         poses = out[..., :-6].reshape(bs, 128, 80, 6, 2)
         confs = torch.nn.functional.softmax(out[..., -6:].reshape(bs, 128, 6), -1)
-        return poses, confs #out.reshape(-1, 128, 80, 2)
+        poses_cum = torch.cumsum(poses, 2)
+        return poses_cum, confs #out.reshape(-1, 128, 80, 2)
+
 
 class Model(nn.Module):
     def __init__(self):

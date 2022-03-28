@@ -4,6 +4,7 @@ import torch.nn as nn
 import numpy as np
 from einops import rearrange
 
+
 # from test_train import get_ade_from_pred_speed_with_mask, get_speed_ade_with_mask
 
 
@@ -40,26 +41,29 @@ def train_multymodal(model, loader, optimizer, num_ep=10, checkpointer=None, log
             optimizer.zero_grad()
             poses, confs = model(data)
             # poses -> bs, num_peds, times, modes, 2
-            loss = pytorch_neg_multi_log_likelihood_batch(data, poses, confs).mean()
+            loss_nll = pytorch_neg_multi_log_likelihood_batch(data, poses, confs).mean()
+            uni_ades = []
+            for mode in range(poses.shape[3]):
+                ades = uni_ade_poses(data, poses[:, :, :,
+                                           mode])  # calc uni ade. 1.pred = pred+cur, 2. torch.norm(pred, gt), 3. apply mask
+                uni_ades.append(ades)
+            m_ades = torch.stack(uni_ades, dim=1)
+            m_ades = torch.min(m_ades, dim=1).values
+
+            valid = get_valid_data_mask(data)
+            mask = (data["state/tracks_to_predict"].reshape(-1, 128, 1).repeat(1, 1, 80) > 0) * (valid > 0)
+            m_ade = m_ades[mask > 0].mean()
+            loss = m_ade + 0.3 * loss_nll
             loss.backward()
 
             optimizer.step()
             with torch.no_grad():
                 # min ade:
-                uni_ades = []
-                for mode in range(poses.shape[3]):
-                        ades = uni_ade_poses(data, poses[:,:,:,mode]) # calc uni ade. 1.pred = pred+cur, 2. torch.norm(pred, gt), 3. apply mask
-                        uni_ades.append(ades.detach())
-                m_ades = torch.stack(uni_ades, dim=1)
-                m_ades = torch.min(m_ades, dim=1).values
 
-                valid = get_valid_data_mask(data)
-                mask = data["state/tracks_to_predict"].reshape(-1, 128, 1).repeat(1, 1, 80) * valid
-                m_ade = m_ades[mask>0].mean()
-                losses = torch.cat([losses, torch.tensor([loss.detach().item()])], 0)
+                losses = torch.cat([losses, torch.tensor([loss_nll.detach().item()])], 0)
                 pbar.set_description("ep %s chank %s" % (epoch, chank))
                 pbar.set_postfix({"loss": losses.mean().item(), "m_ade": m_ade.item()})
-                logger.log({"loss": loss,
+                logger.log({"loss": loss_nll,
                             "min_ade": m_ade.item()})
                 if len(losses) > 500:
                     losses = losses[100:]
@@ -73,9 +77,10 @@ def uni_ade_poses(data, predictions):
 
     cur = get_current(data).to(predictions.device)
     assert cur.shape == torch.Size([bs, 1, num_ped, 2])
-    pred_moved = predictions + cur.permute(0,2,1,3)
-    dist = torch.norm((pred_moved - gt_fut.permute(0,2,1,3)), dim=-1)
+    pred_moved = predictions + cur.permute(0, 2, 1, 3)
+    dist = torch.norm((pred_moved - gt_fut.permute(0, 2, 1, 3)), dim=-1)
     return dist
+
 
 def get_future(data):
     bs = data["state/future/x"].shape[0]
@@ -150,7 +155,7 @@ def get_ade_from_pred_speed_with_mask(data, pred, num_ped=128, future_steps=80):
     assert gt_fut.shape == torch.Size([bs, future_steps, num_ped, 2])
     dist = torch.norm((loss.permute(0, 2, 1, 3) - gt_fut), dim=3)
     valid = get_valid_data_mask(data)
-    mask = data["state/tracks_to_predict"].reshape(-1, 128, 1).repeat(1, 1, 80) * valid
+    mask = data["state/tracks_to_predict"].reshape(-1, 128, 1).repeat(1, 1, 80) > 0 * valid > 0
     mask = mask.permute(0, 2, 1)
     dist_masked = dist[mask > 0]
     return dist_masked
@@ -188,7 +193,7 @@ def pytorch_neg_multi_log_likelihood_batch(data, logits, confidences):
     cur = get_current(data)
     assert cur.shape == torch.Size([bs, 1, num_ped, 2])
     cur = rearrange(cur, "bs time num_peds data -> (bs num_peds) 1 time data").to(logits.device)
-    logits_moved = logits+cur
+    logits_moved = logits + cur
     confidences = rearrange(confidences, "bs num_peds modes -> (bs num_peds) modes")
     # error (batch_size, num_modes, future_len)
     error = torch.sum(
@@ -196,7 +201,7 @@ def pytorch_neg_multi_log_likelihood_batch(data, logits, confidences):
     )  # reduce coords and use availability
 
     with np.errstate(
-        divide="ignore"
+            divide="ignore"
     ):  # when confidence is 0 log goes to -inf, but we're fine with it
         # error (batch_size, num_modes)
         error = nn.functional.log_softmax(confidences, dim=1) - 0.5 * torch.sum(
