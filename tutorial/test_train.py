@@ -186,10 +186,11 @@ class CustomImageDataset(torch.utils.data.IterableDataset):
         self.transform = transform
         self.target_transform = target_transform
         self.cur_file_index = 0
-        self.dataset = TFRecordDataset(self.tf_files[0], index_path=None, description=self.context_desription)
-        self.iterator = iter(self.dataset)
+
 
     def __iter__(self):
+        self.dataset = TFRecordDataset(self.tf_files[0], index_path=None, description=self.context_desription)
+        self.iterator = iter(self.dataset)
         for file in self.tf_files[1:]:
             dataset = TFRecordDataset(file, index_path=None, description=self.context_desription)
             self.iterator = chain(self.iterator, iter(dataset))
