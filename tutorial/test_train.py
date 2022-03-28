@@ -28,12 +28,13 @@ import numpy as np
 import wandb
 # torch.use_deterministic_algorithms(True)
 import random
+import torch.optim as optim
 random.seed(0)
 torch.manual_seed(0)
 np.random.seed(0)
 
 FILENAME = '/media/robot/hdd/waymo_dataset/tf_example/training/training_tfexample.tfrecord-00000-of-01000'
-DATASET_FOLDER = '/path/to/waymo_open_dataset_motion_v_1_1_0/uncompressed'
+DATASET_FOLDER = '/home/jovyan/uncompressed'
 
 # Example field definition
 roadgraph_features = {
@@ -157,7 +158,7 @@ traffic_light_features = {
 }
 
 context_description = {
-    'roadgraph_samples/xyz': "float",
+    
     "state/current/x": 'float',
     "state/current/y": 'float',
     "state/past/x": 'float',
@@ -170,6 +171,7 @@ context_description = {
     "state/current/valid": "int",
     "state/past/valid": "int",
     "state/tracks_to_predict": "int",
+    'roadgraph_samples/xyz': "float",
 }
 
 
@@ -178,7 +180,9 @@ class CustomImageDataset(torch.utils.data.IterableDataset):
     def __init__(self, tf_dir, context_desription, transform=None, target_transform=None):
         self.tf_dir = tf_dir
         self.context_desription = context_desription
-        self.tf_files = glob.glob("/media/robot/hdd/waymo_dataset/tf_example/training/training_tfexample.*-of-01000")
+        self.tf_files = glob.glob("/home/jovyan/uncompressed/tf_example/training/training_tfexample.tfrecord-*-of-01000")
+        # self.tf_files = glob.glob("/home/jovyan/uncompressed/scenario/training/training.tfrecord-*-of-01000")
+        print(f"train dataset containing {len(self.tf_files)} files")
         self.transform = transform
         self.target_transform = target_transform
         self.cur_file_index = 0
@@ -206,11 +210,12 @@ class CustomImageDataset(torch.utils.data.IterableDataset):
         raise StopIteration
 
 
+
 wandb.init(project="waymo22", entity="aleksey-postnikov")
 wandb.config = {
   "learning_rate": 0.0003,
   "epochs": 10,
-  "batch_size": 4
+  "batch_size": 32
 }
 
 batch_size = wandb.config["batch_size"]
@@ -218,19 +223,16 @@ batch_size = wandb.config["batch_size"]
 tfrecord_path = "/media/robot/hdd/waymo_dataset/tf_example/training/"
 dataset = CustomImageDataset(tfrecord_path, context_description)
 loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size)
-import torch.optim as optim
+
 
 device = "cuda"
 net = MultyModel()
-# net = SimplModel()
 optimizer = optim.Adam(net.parameters(), lr=wandb.config["learning_rate"])
 net = net.to(device)
 
 data = next(iter(dataset))
 
-
 from test.models import Checkpointer
-
 checkpointer = Checkpointer(model=net, torch_seed=0, ckpt_dir="./checkpoints/", checkpoint_frequency=1)
 def overfit_test(model, loader, optimizer):
     losses = torch.rand(0)
@@ -242,7 +244,6 @@ def overfit_test(model, loader, optimizer):
         outputs = model(data)
 
         loss = get_ade_from_pred_speed_with_mask(data, outputs).mean()
-        # loss = ade_loss(data, outputs)
         loss.backward()
         optimizer.step()
         with torch.no_grad():
@@ -259,8 +260,6 @@ def overfit_test(model, loader, optimizer):
     im = vis_cur_and_fut(data, outputs)
     plt.imshow(im)
 
-
-# overfit_test(net, loader, optimizer)
 
 train_multymodal(net, loader, optimizer, checkpointer=checkpointer, num_ep=wandb.config["epochs"], logger=wandb)
 print("done")
