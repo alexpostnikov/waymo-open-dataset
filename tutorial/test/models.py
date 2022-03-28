@@ -266,7 +266,11 @@ class Checkpointer:
       epoch: int,
   ) -> nn.Module:
     """Loads the model from the `ckpt_dir/epoch/model.pt` file."""
-    model_file_name = f'model-seed-{self._torch_seed}-epoch-{epoch}.pt'
-    ckpt_path = os.path.join(self._ckpt_dir, model_file_name)
-    self._model.load_state_dict(torch.load(ckpt_path, map_location=device))
+    if epoch >= 0:
+        model_file_name = f'model-seed-{self._torch_seed}-epoch-{epoch}.pt'
+        ckpt_path = os.path.join(self._ckpt_dir, model_file_name)
+        self._model.load_state_dict(torch.load(ckpt_path, map_location="cuda"))
+        print(f"loading model with  path {ckpt_path}")
+    else:
+        print(f"training from scratch")
     return self._model
