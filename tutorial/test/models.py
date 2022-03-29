@@ -51,8 +51,9 @@ class PercieverBased(nn.Module):
 
 
 class MultyModel(nn.Module):
-    def __init__(self):
+    def __init__(self, use_every_nth_prediction):
         super().__init__()
+        self.use_every_nth_prediction = use_every_nth_prediction
         self.tr = nn.Transformer(d_model=500+25, nhead=5, num_encoder_layers=4)  # .cuda()
         self.lin_xyz = nn.Linear(3, 2)  # .cuda()
         # self.lin_xyz_post = nn.Linear(self.tr.d_model, 64)
@@ -77,7 +78,7 @@ class MultyModel(nn.Module):
         self.dec_f = nn.Sequential(nn.Linear(22+256, 512),
                                  nn.ReLU(),
                                  nn.LayerNorm(512),
-                                 nn.Linear(512, (160+1)*6))
+                                 nn.Linear(512, ((160//self.use_every_nth_prediction)+1)*6))
         self.fourier_encode_data = True
         self.tgt_xyz = nn.Parameter(torch.rand(128, self.tr.d_model).cuda(), requires_grad=True)
         self.tgt_fut = nn.Parameter(torch.rand(128, 256).cuda(), requires_grad=True)
@@ -144,10 +145,10 @@ class MultyModel(nn.Module):
                          -1).permute(0, 2, 1, 3)
         state = (torch.cat([cur, past], 1) - cur).permute(0, 2, 1, 3).reshape(-1, 128, 11 * 2).cuda()
         out = self.dec_f(torch.cat([out_dec, state], dim=2))
-        poses = out[..., :-6].reshape(bs, 128, 80, 6, 2)
+        poses = out[..., :-6].reshape(bs, 128, -1, 6, 2)
         confs = torch.nn.functional.softmax(out[..., -6:].reshape(bs, 128, 6), -1)
         poses_cum = torch.cumsum(poses, 2)
-        return poses_cum, confs #out.reshape(-1, 128, 80, 2)
+        return poses_cum, confs  #out.reshape(-1, 128, 80, 2)
 
 
 class Model(nn.Module):

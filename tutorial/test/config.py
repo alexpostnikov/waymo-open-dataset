@@ -76,7 +76,10 @@ def build_parser():
     # #### Model ##############################################################
     ###########################################################################
 
-
+    parser.add_argument(
+        '--use_every_nth_prediction', type=int, default=1,
+        help=f'if use_ever_nth_prediction then instead of 80 positions in future with dt=0.1 will be predicted 40 '
+             f'positions with dt=0.2')
 
     ###########################################################################
     # #### Method-Specific Hypers #############################################
