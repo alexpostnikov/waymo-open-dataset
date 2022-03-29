@@ -33,41 +33,81 @@ def train(model, loader, optimizer, num_ep=10):
                     losses = losses[100:]
 
 
-def train_multymodal(model, loader, optimizer, num_ep=10, checkpointer=None, logger=None):
-    losses = torch.rand(0)
+def train_multymodal(model, loaders, optimizer, num_ep=10, checkpointer=None, logger=None):
+
+    train_loader, test_loader = loaders
     for epoch in range(num_ep):  # loop over the dataset multiple times
-        pbar = tqdm(loader)
-        for chank, data in enumerate(pbar):
-            optimizer.zero_grad()
-            poses, confs = model(data)
-            # poses -> bs, num_peds, times, modes, 2
-            loss_nll = pytorch_neg_multi_log_likelihood_batch(data, poses, confs).mean()
-            uni_ades = []
-            for mode in range(poses.shape[3]):
-                ades = uni_ade_poses(data, poses[:, :, :,
-                                           mode])  # calc uni ade. 1.pred = pred+cur, 2. torch.norm(pred, gt), 3. apply mask
-                uni_ades.append(ades)
-            m_ades = torch.stack(uni_ades, dim=1)
-            m_ades = torch.min(m_ades, dim=1).values
+        train_losses = train_epoch(epoch, logger, model, optimizer, train_loader)
+        # test_losses = test_epoch(epoch, logger, model, test_loader)
+        checkpointer.save(epoch, train_losses.mean().item())
 
-            valid = get_valid_data_mask(data)
-            mask = (data["state/tracks_to_predict"].reshape(-1, 128, 1).repeat(1, 1, 80) > 0) * (valid > 0)
-            m_ade = m_ades[mask > 0].mean()
-            loss = m_ade + 0.3 * loss_nll
-            loss.backward()
 
-            optimizer.step()
-            with torch.no_grad():
-                # min ade:
+def test_epoch(epoch, logger, model, test_loader, max_chanks=100):
+    losses = torch.rand(0)
+    pbar = tqdm(test_loader)
+    model.eval()
+    for chank, data in enumerate(pbar):
+        if chank > max_chanks:
+            break
+        poses, confs = model(data)
+        # poses -> bs, num_peds, times, modes, 2
+        loss_nll = pytorch_neg_multi_log_likelihood_batch(data, poses, confs).mean()
+        uni_ades = []
+        for mode in range(poses.shape[3]):
+            ades = uni_ade_poses(data, poses[:, :, :,
+                                       mode])  # calc uni ade. 1.pred = pred+cur, 2. torch.norm(pred, gt), 3. apply mask
+            uni_ades.append(ades)
+        m_ades = torch.stack(uni_ades, dim=1)
+        m_ades = torch.min(m_ades, dim=1).values
 
-                losses = torch.cat([losses, torch.tensor([loss_nll.detach().item()])], 0)
-                pbar.set_description("ep %s chank %s" % (epoch, chank))
-                pbar.set_postfix({"loss": losses.mean().item(), "m_ade": m_ade.item()})
-                logger.log({"loss": loss_nll,
-                            "min_ade": m_ade.item()})
-                if len(losses) > 500:
-                    losses = losses[100:]
-        checkpointer.save(epoch, losses.mean().item())
+        valid = get_valid_data_mask(data)
+        mask = (data["state/tracks_to_predict"].reshape(-1, 128, 1).repeat(1, 1, 80) > 0) * (valid > 0)
+        m_ade = m_ades[mask > 0].mean()
+
+        with torch.no_grad():
+            losses = torch.cat([losses, torch.tensor([loss_nll.detach().item()])], 0)
+            pbar.set_description("ep %s chank %s" % (epoch, chank))
+            pbar.set_postfix({"loss": losses.mean().item(), "m_ade": m_ade.item()})
+            logger.log({"loss": loss_nll,
+                        "min_ade": m_ade.item()})
+            if len(losses) > 500:
+                losses = losses[100:]
+    return losses
+
+def train_epoch(epoch, logger, model, optimizer, train_loader):
+    losses = torch.rand(0)
+    pbar = tqdm(train_loader)
+    for chank, data in enumerate(pbar):
+        optimizer.zero_grad()
+        poses, confs = model(data)
+        # poses -> bs, num_peds, times, modes, 2
+        loss_nll = pytorch_neg_multi_log_likelihood_batch(data, poses, confs).mean()
+        uni_ades = []
+        for mode in range(poses.shape[3]):
+            ades = uni_ade_poses(data, poses[:, :, :,
+                                       mode])  # calc uni ade. 1.pred = pred+cur, 2. torch.norm(pred, gt), 3. apply mask
+            uni_ades.append(ades)
+        m_ades = torch.stack(uni_ades, dim=1)
+        m_ades = torch.min(m_ades, dim=1).values
+
+        valid = get_valid_data_mask(data)
+        mask = (data["state/tracks_to_predict"].reshape(-1, 128, 1).repeat(1, 1, 80) > 0) * (valid > 0)
+        m_ade = m_ades[mask > 0].mean()
+        loss = m_ade + 0.3 * loss_nll
+        loss.backward()
+
+        optimizer.step()
+        with torch.no_grad():
+            # min ade:
+
+            losses = torch.cat([losses, torch.tensor([loss_nll.detach().item()])], 0)
+            pbar.set_description("ep %s chank %s" % (epoch, chank))
+            pbar.set_postfix({"loss": losses.mean().item(), "m_ade": m_ade.item()})
+            logger.log({"loss": loss_nll,
+                        "min_ade": m_ade.item()})
+            if len(losses) > 500:
+                losses = losses[100:]
+    return losses
 
 
 def uni_ade_poses(data, predictions):
