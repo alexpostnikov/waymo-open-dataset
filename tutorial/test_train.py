@@ -7,7 +7,7 @@
 
 import tensorflow as tf
 
-from test.models import Model, SimplModel, MultyModel
+from test.models import Model, SimplModel, MultyModel, PercieverBased
 from test.train import train, train_multymodal
 from test.visualize import vis_cur_and_fut
 from test.train import get_speed_ade_with_mask, get_ade_from_pred_speed_with_mask
@@ -237,7 +237,7 @@ train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size,
 test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, num_workers=0)
 
 device = "cuda"
-net = MultyModel()
+net = MultyModel(config.use_every_nth_prediction)
 # net = SimplModel()
 optimizer = optim.Adam(net.parameters(), lr=wandb.config["learning_rate"])
 net = net.to(device)
@@ -279,6 +279,7 @@ def overfit_test(model, loader, optimizer):
     plt.imshow(im)
 
 
-train_multymodal(net, (train_loader, test_loader), optimizer, checkpointer=checkpointer, num_ep=wandb.config["epochs"], logger=wandb)
+train_multymodal(net, (train_loader, test_loader), optimizer, checkpointer=checkpointer, num_ep=wandb.config["epochs"],
+                 logger=wandb, use_every_nth_prediction=config.use_every_nth_prediction)
 print("done")
 print("done")
