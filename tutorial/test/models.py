@@ -4,7 +4,7 @@ import os
 from einops import rearrange, repeat
 from numpy import pi
 import torch.nn.functional
-
+from test.perciever import Perceiver
 def fourier_encode(x, max_freq, num_bands = 4):
     x = x.unsqueeze(-1)
     device, dtype, orig_x = x.device, x.dtype, x
@@ -16,6 +16,39 @@ def fourier_encode(x, max_freq, num_bands = 4):
     x = torch.cat([x.sin(), x.cos()], dim = -1)
     x = torch.cat((x, orig_x), dim = -1)
     return x
+
+
+class PercieverBased(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        self.perc = Perceiver(num_freq_bands=12, depth=4, max_freq=10, latent_dim=161*6, #(80*6*2)+6,
+                                 num_latents=128, input_channels=54, final_classifier_head=False)
+
+        self.perc_xyz = Perceiver(num_freq_bands=12, depth=4, max_freq=10, latent_dim=32,  # (80*6*2)+6,
+                              num_latents=128, input_channels=200, final_classifier_head=False)
+        self.xyz_lin_0 = nn.Linear(80, 128)
+        self.xyz_lin_1 = nn.Linear(10, 11)
+
+
+    def forward(self, data):
+        bs = data["roadgraph_samples/xyz"].shape[0]
+        xyz = data["roadgraph_samples/xyz"].reshape(bs, 20000, 3).reshape(bs, -1, 200).cuda()
+        xyz = self.perc_xyz(xyz.unsqueeze(2))
+        # xyz = self.xyz_lin_0(xyz.reshape(bs, 500, 80)).permute(0, 2, 1).unsqueeze(2)
+        # xyz = self.xyz_lin_1(xyz.reshape(bs, 128, 50, 10)).permute(0, 1, 3, 2)
+        cur = torch.cat(
+            [data["state/current/x"].reshape(-1, 128, 1, 1), data["state/current/y"].reshape(-1, 128, 1, 1)], -1)
+        past = torch.cat(
+            [data["state/past/x"].reshape(-1, 128, 10, 1), data["state/past/y"].reshape(-1, 128, 10, 1)],
+            -1)
+        x = torch.cat([xyz, torch.cat([cur, past], dim=2).reshape(bs,128,-1).cuda()], dim=2)
+        out = self.perc(x.unsqueeze(2))
+        poses = out[..., :-6].reshape(bs, 128, 80, 6, 2)
+        confs = torch.nn.functional.softmax(out[..., -6:].reshape(bs, 128, 6), -1)
+        poses_cum = torch.cumsum(poses, 2)
+        return poses_cum, confs
+
 
 class MultyModel(nn.Module):
     def __init__(self):
@@ -54,7 +87,6 @@ class MultyModel(nn.Module):
         bs = data["roadgraph_samples/xyz"].shape[0]
 
         xyz = data["roadgraph_samples/xyz"].reshape(bs, -1, 3).cuda()
-
 
         xyz_mean = data["roadgraph_samples/xyz"].reshape(bs, -1, 3).mean(1).reshape(bs,1,3).cuda()
         src = self.lin_xyz(xyz - xyz_mean).reshape(bs, -1, 500)
