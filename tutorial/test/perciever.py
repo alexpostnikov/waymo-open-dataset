@@ -12,9 +12,6 @@ from einops.layers.torch import Reduce
 from typing import List, Mapping, Optional, Tuple
 
 
-from ysdc_dataset_api.evaluation.metrics import (
-    average_displacement_error_torch, final_displacement_error_torch,
-    batch_mean_metric_torch)
 
 
 # helpers
