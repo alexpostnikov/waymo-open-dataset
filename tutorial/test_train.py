@@ -277,13 +277,8 @@ def overfit_test(model, loader, optimizer):
     im = vis_cur_and_fut(data, outputs)
     plt.imshow(im)
 
-<<<<<<< HEAD
-train_multymodal(net, (train_loader, test_loader), optimizer, checkpointer=checkpointer, num_ep=wandb.config["epochs"], logger=wandb)
-
-=======
-
 train_multymodal(net, (train_loader, test_loader), optimizer, checkpointer=checkpointer, num_ep=wandb.config["epochs"],
                  logger=wandb, use_every_nth_prediction=config.use_every_nth_prediction)
->>>>>>> a31108ea528cef0898ffb438d3ae90bdc104ca65
+
 print("done")
 print("done")
