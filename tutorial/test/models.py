@@ -5,16 +5,18 @@ from einops import rearrange, repeat
 from numpy import pi
 import torch.nn.functional
 from test.perciever import Perceiver
-def fourier_encode(x, max_freq, num_bands = 4):
+
+
+def fourier_encode(x, max_freq, num_bands=4):
     x = x.unsqueeze(-1)
     device, dtype, orig_x = x.device, x.dtype, x
 
-    scales = torch.linspace(1., max_freq / 2, num_bands, device = device, dtype = dtype)
+    scales = torch.linspace(1., max_freq / 2, num_bands, device=device, dtype=dtype)
     scales = scales[(*((None,) * (len(x.shape) - 1)), Ellipsis)]
 
     x = x * scales * pi
-    x = torch.cat([x.sin(), x.cos()], dim = -1)
-    x = torch.cat((x, orig_x), dim = -1)
+    x = torch.cat([x.sin(), x.cos()], dim=-1)
+    x = torch.cat((x, orig_x), dim=-1)
     return x
 
 
@@ -22,14 +24,13 @@ class PercieverBased(nn.Module):
     def __init__(self):
         super().__init__()
 
-        self.perc = Perceiver(num_freq_bands=12, depth=4, max_freq=10, latent_dim=161*6, #(80*6*2)+6,
-                                 num_latents=128, input_channels=54, final_classifier_head=False)
+        self.perc = Perceiver(num_freq_bands=12, depth=4, max_freq=10, latent_dim=161 * 6,  # (80*6*2)+6,
+                              num_latents=128, input_channels=54, final_classifier_head=False)
 
         self.perc_xyz = Perceiver(num_freq_bands=12, depth=4, max_freq=10, latent_dim=32,  # (80*6*2)+6,
-                              num_latents=128, input_channels=200, final_classifier_head=False)
+                                  num_latents=128, input_channels=200, final_classifier_head=False)
         self.xyz_lin_0 = nn.Linear(80, 128)
         self.xyz_lin_1 = nn.Linear(10, 11)
-
 
     def forward(self, data):
         bs = data["roadgraph_samples/xyz"].shape[0]
@@ -42,7 +43,7 @@ class PercieverBased(nn.Module):
         past = torch.cat(
             [data["state/past/x"].reshape(-1, 128, 10, 1), data["state/past/y"].reshape(-1, 128, 10, 1)],
             -1)
-        x = torch.cat([xyz, torch.cat([cur, past], dim=2).reshape(bs,128,-1).cuda()], dim=2)
+        x = torch.cat([xyz, torch.cat([cur, past], dim=2).reshape(bs, 128, -1).cuda()], dim=2)
         out = self.perc(x.unsqueeze(2))
         poses = out[..., :-6].reshape(bs, 128, 80, 6, 2)
         confs = torch.nn.functional.softmax(out[..., -6:].reshape(bs, 128, 6), -1)
@@ -54,14 +55,14 @@ class MultyModel(nn.Module):
     def __init__(self, use_every_nth_prediction):
         super().__init__()
         self.use_every_nth_prediction = use_every_nth_prediction
-        self.tr = nn.Transformer(d_model=500+25, nhead=5, num_encoder_layers=4)  # .cuda()
+        self.tr = nn.Transformer(d_model=500 + 25, nhead=5, num_encoder_layers=4)  # .cuda()
         self.lin_xyz = nn.Linear(3, 2)  # .cuda()
         # self.lin_xyz_post = nn.Linear(self.tr.d_model, 64)
         self.lin_xyz_post = nn.Sequential(nn.Linear(self.tr.d_model, 128),
-                      nn.ReLU(),
-                      nn.LayerNorm(128),
-                      nn.Linear(128, 64))
-        self.hist_tr = nn.Transformer(d_model=24+9, nhead=3, num_encoder_layers=4)  # .cuda()
+                                          nn.ReLU(),
+                                          nn.LayerNorm(128),
+                                          nn.Linear(128, 64))
+        self.hist_tr = nn.Transformer(d_model=24 + 9, nhead=3, num_encoder_layers=4)  # .cuda()
         self.hist_tr_tgt = nn.Parameter(torch.rand(128, self.hist_tr.d_model).cuda(), requires_grad=True)
         # self.lin_hist = nn.Linear(22, 24)  # .cuda()
         self.lin_hist = nn.Sequential(nn.Linear(22, 64),
@@ -75,21 +76,18 @@ class MultyModel(nn.Module):
                                  nn.LayerNorm(512),
                                  nn.Linear(512, 256))
 
-        self.dec_f = nn.Sequential(nn.Linear(22+256, 512),
-                                 nn.ReLU(),
-                                 nn.LayerNorm(512),
-                                 nn.Linear(512, ((160//self.use_every_nth_prediction)+1)*6))
+        self.dec_f = nn.Sequential(nn.Linear(22 + 256, 512),
+                                   nn.ReLU(),
+                                   nn.LayerNorm(512),
+                                   nn.Linear(512, ((160 // self.use_every_nth_prediction) + 1) * 6))
         self.fourier_encode_data = True
         self.tgt_xyz = nn.Parameter(torch.rand(128, self.tr.d_model).cuda(), requires_grad=True)
         self.tgt_fut = nn.Parameter(torch.rand(128, 256).cuda(), requires_grad=True)
 
-
     def forward(self, data):
         bs = data["roadgraph_samples/xyz"].shape[0]
-
         xyz = data["roadgraph_samples/xyz"].reshape(bs, -1, 3).cuda()
-
-        xyz_mean = data["roadgraph_samples/xyz"].reshape(bs, -1, 3).mean(1).reshape(bs,1,3).cuda()
+        xyz_mean = data["roadgraph_samples/xyz"].reshape(bs, -1, 3).mean(1).reshape(bs, 1, 3).cuda()
         src = self.lin_xyz(xyz - xyz_mean).reshape(bs, -1, 500)
         if self.fourier_encode_data:
             # calculate fourier encoded positions in the range of [-1, 1], for all axis
@@ -113,12 +111,12 @@ class MultyModel(nn.Module):
                          -1)
         # state = torch.cat([cur, past - cur], 1).permute(0, 2, 1, 3).reshape(-1, 128, 11 * 2).cuda()
         state = (torch.cat([cur, past], 2).cuda() - xyz_mean[:, :, :2].reshape(bs, 1, 1, 2))
-        state = rearrange(state, "bs nump time datadim -> bs nump (time datadim) ")  #.reshape(-1, 128, 11 * 2)
+        state = rearrange(state, "bs nump time datadim -> bs nump (time datadim) ")  # .reshape(-1, 128, 11 * 2)
         state_emb = self.lin_hist(state)
         if self.fourier_encode_data:
             # calculate fourier encoded positions in the range of [-1, 1], for all axis
             axis_pos = list(map(lambda size: torch.linspace(-1., 1., steps=size, device="cuda"), state_emb.shape[1:-1]))
-            pos = torch.stack(torch.meshgrid(*axis_pos), dim = -1)
+            pos = torch.stack(torch.meshgrid(*axis_pos), dim=-1)
             enc_pos = fourier_encode(pos, 12)
             enc_pos = rearrange(enc_pos, '... n d -> ... (n d)')
             enc_pos = repeat(enc_pos, '... -> b ...', b=bs)
@@ -138,7 +136,7 @@ class MultyModel(nn.Module):
         out_3 = out_3.permute(1, 0, 2).reshape(bs, 128, -1)  # bs, 128, 80 ,2
 
         fin_input = torch.cat([state_emb, out_3], -1)
-        out_dec = self.dec(fin_input) #.reshape(-1, 128, 80, 2)
+        out_dec = self.dec(fin_input)  # .reshape(-1, 128, 80, 2)
         cur = torch.cat(
             [data["state/current/x"].reshape(-1, 1, 128, 1), data["state/current/y"].reshape(-1, 1, 128, 1)], -1)
         past = torch.cat([data["state/past/x"].reshape(-1, 128, 10, 1), data["state/past/y"].reshape(-1, 128, 10, 1)],
@@ -148,7 +146,171 @@ class MultyModel(nn.Module):
         poses = out[..., :-6].reshape(bs, 128, -1, 6, 2)
         confs = torch.nn.functional.softmax(out[..., -6:].reshape(bs, 128, 6), -1)
         poses_cum = torch.cumsum(poses, 2)
-        return poses_cum, confs  #out.reshape(-1, 128, 80, 2)
+        return poses_cum, confs  # out.reshape(-1, 128, 80, 2)
+
+
+class MapLess(nn.Module):
+    def __init__(self, use_every_nth_prediction):
+        super().__init__()
+        self.use_every_nth_prediction = use_every_nth_prediction
+
+        self.spatial_lin = nn.Sequential(nn.Linear(2, 8),
+                                         nn.ReLU(),
+                                         nn.LayerNorm(8),
+                                         nn.Linear(8, 64))
+        self.spatial_tgt = nn.Parameter(torch.rand(128, 64).cuda(), requires_grad=True)
+        num_l = 8
+        self.spatial_tr = nn.Transformer(d_model=64, nhead=4, num_encoder_layers=num_l, batch_first=True,
+                                         dim_feedforward=64, dropout=0.01)
+
+        self.temporal_lin = nn.Sequential(nn.Linear(32, 8),
+                                          nn.ReLU(),
+                                          nn.LayerNorm(8),
+                                          nn.Linear(8, 64))
+        self.temporal_tgt = nn.Parameter(torch.rand(11, 64+25).cuda(), requires_grad=True)
+        self.temporal_tr = nn.Transformer(d_model=64+25, nhead=1, num_encoder_layers=num_l, batch_first=True,
+                                         dim_feedforward=64, dropout=0.01)
+
+
+        self.temporal_tr_after = nn.Sequential(nn.Linear(64+25, 128),
+                                          nn.ReLU(),
+                                          nn.LayerNorm(128),
+                                          nn.Linear(128, 32))
+        # nn.Linear(64 + 25, 64)
+        self.tr = nn.Transformer(d_model=64, nhead=4, num_encoder_layers=num_l, batch_first=True,
+                                         dim_feedforward=64, dropout=0.01)  # .cuda()
+
+        self.tr_tgt = nn.Parameter(torch.rand(80 // use_every_nth_prediction, 64).cuda(), requires_grad=True)
+
+        self.dec_f = nn.Sequential(nn.Linear(80 // use_every_nth_prediction * 64, 512),
+                                   nn.ReLU(),
+                                   nn.LayerNorm(512),
+                                   nn.Linear(512, ((160 // self.use_every_nth_prediction) + 1) * 6))
+        self.lstm = nn.LSTM(66, 48, 1, batch_first=True)
+        self.confs = nn.Linear(12 * 80 // use_every_nth_prediction, 6)
+        self.state_lin = nn.Linear(20,  80//use_every_nth_prediction * 2)
+
+        self.out_lin = nn.Sequential(nn.Linear(8, 4),
+                                     nn.ReLU(),
+                                     nn.Linear(4, 2))
+
+        self.lstm_pre = nn.Sequential(nn.Linear(2, 8),
+                                   nn.ReLU(),
+                                   nn.LayerNorm(8),
+                                   # nn.BatchNorm1d(512),
+                                   nn.Linear(8, 32))
+
+        self.lstm = nn.LSTM(32, 64, 1, batch_first=True)
+        self.lstm_past = nn.Sequential(nn.Linear(64*11, 512),
+                                   nn.ReLU(),
+                                   nn.LayerNorm(512),
+                                   # nn.BatchNorm1d(512),
+                                    nn.Linear(512, ((160 // self.use_every_nth_prediction) + 1) * 6))
+
+        #
+        # self.SIMPL = nn.Sequential(nn.Linear(22, 512),
+        #                            nn.ReLU(),
+        #                            nn.LayerNorm(512),
+        #                            # nn.BatchNorm1d(512),
+        #                            nn.Linear(512, ((160 // self.use_every_nth_prediction) + 1) * 6))
+    def forward(self, data):
+        bs = data["roadgraph_samples/xyz"].shape[0]
+        if 0:
+            cur = torch.cat(
+                [data["state/current/x"].reshape(-1, 128, 1, 1), data["state/current/y"].reshape(-1, 128, 1, 1)], -1)
+
+            past = torch.cat([data["state/past/x"].reshape(-1, 128, 10, 1), data["state/past/y"].reshape(-1, 128, 10, 1)],
+                             -1)
+            # state = torch.cat([cur, past - cur], 1).permute(0, 2, 1, 3).reshape(-1, 128, 11 * 2).cuda()
+            state = torch.cat([cur, past], 2).cuda() - cur.cuda()
+            state_temporal = self.temporal_lin(rearrange(state, "bs nump time datadim -> (bs nump) time datadim"))
+            tgt_temporal = self.temporal_tgt.unsqueeze(0).repeat(bs * 128, 1, 1)
+
+            axis_pos = list(map(lambda size: torch.linspace(-1., 1., steps=size, device="cuda"), state_temporal.shape[1:2]))
+            pos = torch.stack(torch.meshgrid(*axis_pos), dim=-1)
+            enc_pos = fourier_encode(pos, 10, 12)
+            enc_pos = rearrange(enc_pos, '... n d -> ... (n d)')
+            enc_pos = repeat(enc_pos, '... -> b ...', b=bs*128)
+
+            state_temporal = torch.cat((state_temporal, enc_pos.to(state_temporal.device)), dim=-1)
+
+            temporal_out = self.temporal_tr(state_temporal, tgt_temporal)
+            temporal_out = self.temporal_tr_after(temporal_out)
+            temporal_out = rearrange(temporal_out, "(bs nump) time datadim -> bs nump time datadim", nump=128)
+
+            spatial_outs = torch.rand(bs, 128, 0, 64).cuda()
+            for timestemp in range(5):
+                state_spatial = state[:, :, timestemp*2, :]
+                state_spatial = self.spatial_lin(state_spatial)
+                tgt_spatial = self.spatial_tgt.unsqueeze(0).repeat(bs, 1, 1)
+                spatial_out = self.spatial_tr(state_spatial, tgt_spatial)
+                spatial_out = rearrange(spatial_out, "bs nump datadim -> bs nump 1 datadim")
+                spatial_outs = torch.cat([spatial_outs, spatial_out], dim=2)
+            out = torch.cat([spatial_outs, temporal_out], dim=2)
+            out = rearrange(out, "bs nump time datadim -> (bs nump) time datadim")
+
+            tr_tgt = self.tr_tgt.unsqueeze(0).repeat(bs * 128, 1, 1)
+            # print (tr_tgt.shape, out.shape)
+            out_tr = self.tr(out, tr_tgt)
+
+            # out_tr -> bs*128, 80//self.use_every_nth_prediction, 32
+            # out_tr = out_tr.reshape(bs * 128, -1)
+            # out = self.dec_f(out_tr)
+
+            h0 = cur.cuda().reshape(bs*128, 1, 2).permute(1, 0, 2).repeat(1, 1, 4*6).cuda() + 0  #.reshape() torch.randn(bs*128, 1, 2)
+            # c0 = torch.randn(1, bs*128, 12).cuda()
+            c0 = cur.cuda().reshape(bs * 128, 1, 2).permute(1, 0, 2).repeat(1, 1, 4*6).cuda() + 0
+
+            cur = torch.cat(
+                [data["state/current/x"].reshape(-1, 1, 128, 1), data["state/current/y"].reshape(-1, 1, 128, 1)], -1)
+            past = torch.cat([data["state/past/x"].reshape(-1, 128, 10, 1), data["state/past/y"].reshape(-1, 128, 10, 1)],
+                             -1).permute(0, 2, 1, 3)
+            state = (past - cur).permute(0, 2, 1, 3).reshape(bs*128, 10 * 2).cuda()
+
+            state_emb = self.state_lin(state).reshape(bs*128, 80//self.use_every_nth_prediction, 2)
+            # state -> bs, 128, 10, 2
+            # out_tr -> bs*128, 80//self.use_every_nth_prediction, 32
+            out, (_, _) = self.lstm(torch.cat([out_tr, state_emb],dim=2), (h0, c0))
+            out = out.reshape(bs, 128, 80//self.use_every_nth_prediction, 6, 8)
+            out = self.out_lin(out)
+            poses = out+0 #out[:,:,:, :-6].reshape(bs, 128, -1, 6, 2)
+            confs = self.confs(poses.reshape(bs, 128, -1))
+            confs = torch.nn.functional.softmax(confs, -1)
+            poses_cum = torch.cumsum(poses, 2)
+
+        cur = torch.cat(
+            [data["state/current/x"].reshape(-1, 128, 1, 1), data["state/current/y"].reshape(-1, 128, 1, 1)], -1)
+
+        past = torch.cat([data["state/past/x"].reshape(-1, 128, 10, 1), data["state/past/y"].reshape(-1, 128, 10, 1)],
+                         -1)  # .permute(0, 2, 1, 3)
+
+        state_emb = self.lstm_pre(torch.cat([cur, past - cur], dim=2).reshape(bs * 128, 11, -1).cuda())
+        # state_emb -> bs, 128, 11, 32
+        state = state_emb + 0 # torch.cat([cur, past], 2).cuda() - cur.cuda()
+        state_temporal = self.temporal_lin(state) #rearrange(state, "bs nump time datadim -> (bs nump) time datadim"))
+        tgt_temporal = self.temporal_tgt.unsqueeze(0).repeat(bs * 128, 1, 1)
+
+        axis_pos = list(map(lambda size: torch.linspace(-1., 1., steps=size, device="cuda"), state_temporal.shape[1:2]))
+        pos = torch.stack(torch.meshgrid(*axis_pos), dim=-1)
+        enc_pos = fourier_encode(pos, 10, 12)
+        enc_pos = rearrange(enc_pos, '... n d -> ... (n d)')
+        enc_pos = repeat(enc_pos, '... -> b ...', b=bs * 128)
+
+        state_temporal = torch.cat((state_temporal, enc_pos.to(state_temporal.device)), dim=-1)
+
+        temporal_out = self.temporal_tr(state_temporal, tgt_temporal)
+        temporal_out = self.temporal_tr_after(temporal_out)
+        # temporal_out = rearrange(temporal_out, "(bs nump) time datadim -> bs nump time datadim", nump=128)
+
+
+        out, (_, _) = self.lstm(state_emb + temporal_out)
+        out = self.lstm_past(out.reshape(bs*128, -1))
+        # state = torch.cat([cur, past - cur], dim=2).reshape(bs*128, -1).cuda()
+        # out = self.SIMPL(state)
+        poses = out[..., :-6].reshape(bs, 128, -1, 6, 2)
+        confs = torch.nn.functional.softmax(out[..., -6:].reshape(bs, 128, 6), -1)
+        poses_cum = torch.cumsum(poses, 2)
+        return poses_cum, confs  # out.reshape(-1, 128, 80, 2)
 
 
 class Model(nn.Module):
@@ -169,15 +331,16 @@ class Model(nn.Module):
                                  nn.ReLU(),
                                  nn.Linear(160, 64))
 
-        self.dec_f = nn.Sequential(nn.Linear(22+64, 64),
-                                 nn.ReLU(),
-                                 nn.BatchNorm1d(128),
-                                 nn.Linear(64, 160))
+        self.dec_f = nn.Sequential(nn.Linear(22 + 64, 64),
+                                   nn.ReLU(),
+                                   nn.BatchNorm1d(128),
+                                   nn.Linear(64, 160))
+
     def forward(self, data):
         bs = data["roadgraph_samples/xyz"].shape[0]
 
         xyz = data["roadgraph_samples/xyz"].reshape(bs, -1, 3).cuda()
-        xyz_mean = data["roadgraph_samples/xyz"].reshape(bs, -1, 3).mean(1).reshape(bs,1,3).cuda()
+        xyz_mean = data["roadgraph_samples/xyz"].reshape(bs, -1, 3).mean(1).reshape(bs, 1, 3).cuda()
         src = self.lin_xyz(xyz - xyz_mean).reshape(bs, -1, 500)
         tgt = torch.rand(bs, 128, 500).cuda()
         out_0 = self.tr(src.permute(1, 0, 2), tgt.permute(1, 0, 2)).permute(1, 0, 2)
@@ -189,7 +352,9 @@ class Model(nn.Module):
         past = torch.cat([data["state/past/x"].reshape(-1, 128, 10, 1), data["state/past/y"].reshape(-1, 128, 10, 1)],
                          -1).permute(0, 2, 1, 3)
         # state = torch.cat([cur, past - cur], 1).permute(0, 2, 1, 3).reshape(-1, 128, 11 * 2).cuda()
-        state = (torch.cat([cur, past], 1).permute(0, 2, 1, 3).cuda() - xyz_mean[:, :, :2].reshape(bs, 1, 1, 2)).reshape(-1, 128, 11 * 2)
+        state = (torch.cat([cur, past], 1).permute(0, 2, 1, 3).cuda() - xyz_mean[:, :, :2].reshape(bs, 1, 1,
+                                                                                                   2)).reshape(-1, 128,
+                                                                                                               11 * 2)
 
         state_emb = self.lin_hist(state)
         tgt = torch.rand(bs, 128, 24).cuda()
@@ -204,7 +369,7 @@ class Model(nn.Module):
         out_3 = out_3.permute(1, 0, 2).reshape(bs, 128, -1)  # bs, 128, 80 ,2
 
         fin_input = torch.cat([state_emb, out_3], -1)
-        out_dec = self.dec(fin_input)#.reshape(-1, 128, 80, 2)
+        out_dec = self.dec(fin_input)  # .reshape(-1, 128, 80, 2)
         cur = torch.cat(
             [data["state/current/x"].reshape(-1, 1, 128, 1), data["state/current/y"].reshape(-1, 1, 128, 1)], -1)
         past = torch.cat([data["state/past/x"].reshape(-1, 128, 10, 1), data["state/past/y"].reshape(-1, 128, 10, 1)],
@@ -247,63 +412,64 @@ class SimplModel(nn.Module):
 
 
 class Checkpointer:
-  """A simple `PyTorch` model load/save wrapper."""
-  def __init__(
-      self,
-      model: nn.Module,
-      torch_seed: int,
-      ckpt_dir: str,
-      checkpoint_frequency: int
-  ) -> None:
-    """Constructs a simple load/save checkpointer."""
-    self._model = model
-    self._torch_seed = torch_seed
-    self._ckpt_dir = ckpt_dir
-    self._best_validation_loss = float('inf')
+    """A simple `PyTorch` model load/save wrapper."""
 
-    # The number of times validation loss must improve prior to our
-    # checkpointing of the model
-    if checkpoint_frequency == -1:
-      self.checkpoint_frequency = float('inf')  # We will never checkpoint
-    else:
-      self.checkpoint_frequency = checkpoint_frequency
+    def __init__(
+            self,
+            model: nn.Module,
+            torch_seed: int,
+            ckpt_dir: str,
+            checkpoint_frequency: int
+    ) -> None:
+        """Constructs a simple load/save checkpointer."""
+        self._model = model
+        self._torch_seed = torch_seed
+        self._ckpt_dir = ckpt_dir
+        self._best_validation_loss = float('inf')
 
-    self._num_improvements_since_last_ckpt = 0
+        # The number of times validation loss must improve prior to our
+        # checkpointing of the model
+        if checkpoint_frequency == -1:
+            self.checkpoint_frequency = float('inf')  # We will never checkpoint
+        else:
+            self.checkpoint_frequency = checkpoint_frequency
 
-    os.makedirs(self._ckpt_dir, exist_ok=True)
+        self._num_improvements_since_last_ckpt = 0
 
-  def save(
-      self,
-      epoch: int,
-      new_validation_loss: float
-  ) -> str:
-    """Saves the model to the `ckpt_dir/epoch/model.pt` file."""
-    model_file_name = f'model-seed-{self._torch_seed}-epoch-{epoch}.pt'
+        os.makedirs(self._ckpt_dir, exist_ok=True)
 
-    if new_validation_loss < self._best_validation_loss:
-      self._num_improvements_since_last_ckpt += 1
-      self._best_validation_loss = new_validation_loss
-
-      if self._num_improvements_since_last_ckpt >= self.checkpoint_frequency:
-        print(
-          f'Validation loss has improved '
-          f'{self._num_improvements_since_last_ckpt} times since last ckpt, '
-          f'storing checkpoint {model_file_name}.')
-    ckpt_path = os.path.join(self._ckpt_dir, model_file_name)
-    torch.save(self._model.state_dict(), ckpt_path)
-    self._num_improvements_since_last_ckpt = 0
-    return ckpt_path
-
-  def load(
-      self,
-      epoch: int,
-  ) -> nn.Module:
-    """Loads the model from the `ckpt_dir/epoch/model.pt` file."""
-    if epoch >= 0:
+    def save(
+            self,
+            epoch: int,
+            new_validation_loss: float
+    ) -> str:
+        """Saves the model to the `ckpt_dir/epoch/model.pt` file."""
         model_file_name = f'model-seed-{self._torch_seed}-epoch-{epoch}.pt'
+
+        if new_validation_loss < self._best_validation_loss:
+            self._num_improvements_since_last_ckpt += 1
+            self._best_validation_loss = new_validation_loss
+
+            if self._num_improvements_since_last_ckpt >= self.checkpoint_frequency:
+                print(
+                    f'Validation loss has improved '
+                    f'{self._num_improvements_since_last_ckpt} times since last ckpt, '
+                    f'storing checkpoint {model_file_name}.')
         ckpt_path = os.path.join(self._ckpt_dir, model_file_name)
-        self._model.load_state_dict(torch.load(ckpt_path, map_location="cuda"))
-        print(f"loading model with  path {ckpt_path}")
-    else:
-        print(f"training from scratch")
-    return self._model
+        torch.save(self._model.state_dict(), ckpt_path)
+        self._num_improvements_since_last_ckpt = 0
+        return ckpt_path
+
+    def load(
+            self,
+            epoch: int,
+    ) -> nn.Module:
+        """Loads the model from the `ckpt_dir/epoch/model.pt` file."""
+        if epoch >= 0:
+            model_file_name = f'model-seed-{self._torch_seed}-epoch-{epoch}.pt'
+            ckpt_path = os.path.join(self._ckpt_dir, model_file_name)
+            self._model.load_state_dict(torch.load(ckpt_path, map_location="cuda"))
+            print(f"loading model with  path {ckpt_path}")
+        else:
+            print(f"training from scratch")
+        return self._model
