@@ -82,6 +82,7 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
     for chank, data in enumerate(pbar):
         optimizer.zero_grad()
         poses, confs = model(data)
+        bs = poses.shape[0]
         # poses -> bs, num_peds, times, modes, 2
         # loss_nll = pytorch_neg_multi_log_likelihood_batch(data, poses, confs, use_every_nth_prediction=use_every_nth_prediction).mean()
 
@@ -101,10 +102,11 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
         poses_moved = cur.permute(0, 2, 1, 3).unsqueeze(3).repeat(1, 1, 1, 6, 1) + poses
         (mask.sum(2) == 80).reshape(-1)
         # log_likelihood(gt.unsqueeze(1), poses_moved.reshape(512, 4, 6, 2).permute(0, 2, 1, 3), confs.reshape(512, 6))
-        loss_nll = -log_likelihood(gt.unsqueeze(1), poses_moved.reshape(512, -1, 6, 2).permute(0, 2, 1, 3), confs.reshape(512, 6))[
+        loss_nll = -log_likelihood(gt.unsqueeze(1), poses_moved.reshape(bs*128, -1, 6, 2).permute(0, 2, 1, 3),
+                                   confs.reshape(bs*128, 6))[
             (mask.sum(2) == 80).reshape(-1)].mean()
         m_ade = m_ades[mask[:, :, ::use_every_nth_prediction] > 0].mean()
-        loss = m_ade + 0.3 * loss_nll
+        loss = m_ade +  loss_nll
         loss.backward()
 
         optimizer.step()

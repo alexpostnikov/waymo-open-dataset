@@ -7,7 +7,7 @@
 
 import tensorflow as tf
 
-from test.models import Model, SimplModel, MultyModel, PercieverBased
+from test.models import Model, SimplModel, MultyModel, PercieverBased, MapLess
 from test.train import train, train_multymodal
 from test.visualize import vis_cur_and_fut
 from test.train import get_speed_ade_with_mask, get_ade_from_pred_speed_with_mask
@@ -237,7 +237,10 @@ test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, n
 
 
 device = "cuda"
-net = MultyModel(config.use_every_nth_prediction)
+net =MapLess(config.use_every_nth_prediction)
+# MultyModel(config.use_every_nth_prediction)
+# net = SimplModel()
+
 optimizer = optim.Adam(net.parameters(), lr=wandb.config["learning_rate"])
 net = net.to(device)
 
@@ -247,7 +250,7 @@ from test.models import Checkpointer
 
 
 checkpointer = Checkpointer(model=net, torch_seed=0, ckpt_dir=config.dir_checkpoint, checkpoint_frequency=1)
-checkpointer.load(config.epoch_to_load)
+net = checkpointer.load(config.epoch_to_load)
 
 
 
