@@ -3,8 +3,8 @@ from tqdm.auto import tqdm
 import torch.nn as nn
 import numpy as np
 from einops import rearrange
-
-
+from test.visualize import vis_cur_and_fut
+import wandb
 # from test_train import get_ade_from_pred_speed_with_mask, get_speed_ade_with_mask
 
 
@@ -106,13 +106,11 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
                                    confs.reshape(bs*128, 6))[
             (mask.sum(2) == 80).reshape(-1)].mean()
         m_ade = m_ades[mask[:, :, ::use_every_nth_prediction] > 0].mean()
-        loss = m_ade +  loss_nll
+        loss = m_ade + loss_nll
         loss.backward()
 
         optimizer.step()
         with torch.no_grad():
-            # min ade:
-
             losses = torch.cat([losses, torch.tensor([loss_nll.detach().item()])], 0)
             mades = torch.cat([mades, torch.tensor([m_ade.detach().item()])], 0)
             pbar.set_description("ep %s chank %s" % (epoch, chank))
@@ -122,6 +120,10 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
                         "min_ade": m_ade.item()})
             if len(losses) > 500:
                 losses = losses[100:]
+        image = vis_cur_and_fut(data, poses)
+        if (chank % 20) == 0:
+            images = wandb.Image(image, caption="Top: Output, Bottom: Input")
+            wandb.log({"examples": images})
     return losses
 
 
