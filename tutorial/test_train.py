@@ -20,7 +20,7 @@ import glob
 from itertools import chain
 import torch
 from tfrecord.torch.dataset import TFRecordDataset
-from torch.utils.data.dataset import T_co
+
 from tqdm.auto import tqdm
 import torch.utils.data
 
@@ -203,7 +203,7 @@ class CustomImageDataset(torch.utils.data.IterableDataset):
 
         return self.iterator
 
-    def __getitem__(self, index) -> T_co:
+    def __getitem__(self, index):
         pass
 
     def __next_file(self):
@@ -232,7 +232,7 @@ test_path = os.path.join(config.dir_data, "testing/testing_tfexample.tfrecord-*-
 # "/media/robot/hdd/waymo_dataset/tf_example/training/"
 train_dataset = CustomImageDataset(train_tfrecord_path, context_description)
 test_dataset = CustomImageDataset(test_path, context_description)
-train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, num_workers=3)
+train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, num_workers=12)
 test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, num_workers=0)
 
 
