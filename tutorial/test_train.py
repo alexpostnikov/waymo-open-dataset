@@ -20,7 +20,7 @@ import glob
 from itertools import chain
 import torch
 from tfrecord.torch.dataset import TFRecordDataset
-from torch.utils.data.dataset import T_co
+
 from tqdm.auto import tqdm
 import torch.utils.data
 
@@ -36,8 +36,9 @@ random.seed(config.np_seed)
 torch.manual_seed(config.torch_seed)
 np.random.seed(config.np_seed)
 
+
 FILENAME = '/media/robot/hdd/waymo_dataset/tf_example/training/training_tfexample.tfrecord-00000-of-01000'
-DATASET_FOLDER = '/path/to/waymo_open_dataset_motion_v_1_1_0/uncompressed'
+DATASET_FOLDER = '/home/jovyan/uncompressed'
 
 # Example field definition
 roadgraph_features = {
@@ -161,7 +162,7 @@ traffic_light_features = {
 }
 
 context_description = {
-    'roadgraph_samples/xyz': "float",
+    
     "state/current/x": 'float',
     "state/current/y": 'float',
     "state/past/x": 'float',
@@ -174,6 +175,7 @@ context_description = {
     "state/current/valid": "int",
     "state/past/valid": "int",
     "state/tracks_to_predict": "int",
+    'roadgraph_samples/xyz': "float",
 }
 
 # from pathlib import Path
@@ -184,7 +186,10 @@ class CustomImageDataset(torch.utils.data.IterableDataset):
     def __init__(self, tf_dir, context_desription, transform=None, target_transform=None, ):
         # self.tf_dir = tf_dir
         self.context_desription = context_desription
+
         self.tf_files = glob.glob(tf_dir)
+        print(f"train dataset containing {len(self.tf_files)} files")
+
         self.transform = transform
         self.target_transform = target_transform
         self.cur_file_index = 0
@@ -198,7 +203,7 @@ class CustomImageDataset(torch.utils.data.IterableDataset):
 
         return self.iterator
 
-    def __getitem__(self, index) -> T_co:
+    def __getitem__(self, index):
         pass
 
     def __next_file(self):
@@ -212,12 +217,6 @@ class CustomImageDataset(torch.utils.data.IterableDataset):
         raise StopIteration
 
 
-parser = argparse.ArgumentParser(description='Process some integers.')
-parser.add_argument('integers', metavar='N', type=int, nargs='+', default=1,
-                    help='an integer for the accumulator')
-parser.add_argument('--sum', dest='accumulate', action='store_const',
-                    const=sum, default=max,
-                    help='sum the integers (default: find the max)')
 
 wandb.init(project="waymo22", entity="aleksey-postnikov", name=config.exp_name)
 wandb.config = {
@@ -233,23 +232,26 @@ test_path = os.path.join(config.dir_data, "testing/testing_tfexample.tfrecord-*-
 # "/media/robot/hdd/waymo_dataset/tf_example/training/"
 train_dataset = CustomImageDataset(train_tfrecord_path, context_description)
 test_dataset = CustomImageDataset(test_path, context_description)
-train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, num_workers=0)
+train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, num_workers=12)
 test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, num_workers=0)
+
 
 device = "cuda"
 net =MapLess(config.use_every_nth_prediction, config.exp_data_dim)
 # MultyModel(config.use_every_nth_prediction)
 # net = SimplModel()
+
 optimizer = optim.Adam(net.parameters(), lr=wandb.config["learning_rate"])
 net = net.to(device)
 
 # data = next(iter(dataset))
 
-
 from test.models import Checkpointer
+
 
 checkpointer = Checkpointer(model=net, torch_seed=0, ckpt_dir=config.dir_checkpoint, checkpoint_frequency=1)
 net = checkpointer.load(config.epoch_to_load)
+
 
 
 def overfit_test(model, loader, optimizer):
@@ -262,7 +264,6 @@ def overfit_test(model, loader, optimizer):
         outputs = model(data)
 
         loss = get_ade_from_pred_speed_with_mask(data, outputs).mean()
-        # loss = ade_loss(data, outputs)
         loss.backward()
         optimizer.step()
         with torch.no_grad():
@@ -279,8 +280,8 @@ def overfit_test(model, loader, optimizer):
     im = vis_cur_and_fut(data, outputs)
     plt.imshow(im)
 
-
 train_multymodal(net, (train_loader, test_loader), optimizer, checkpointer=checkpointer, num_ep=wandb.config["epochs"],
                  logger=wandb, use_every_nth_prediction=config.use_every_nth_prediction)
+
 print("done")
 print("done")
