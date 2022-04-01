@@ -160,6 +160,19 @@ class MapLess(nn.Module):
                                           nn.LayerNorm(128),
                                           nn.Linear(128, data_dim))
 
+        self.xyz_lin = nn.Sequential(nn.Linear(400, 512),
+                                         nn.ReLU(),
+                                         nn.LayerNorm(512),
+                                         nn.Linear(512, data_dim//2),
+                                         nn.ReLU(),
+                                         nn.LayerNorm(data_dim//2),
+                                         nn.Linear(data_dim//2, data_dim-25))
+        self.xyz_tgt = nn.Parameter(torch.rand(11, data_dim).cuda(), requires_grad=True)
+        self.xyz_tr_after = nn.Sequential(nn.Linear(data_dim, 128),
+                                              nn.ReLU(),
+                                              nn.LayerNorm(128),
+                                              nn.Linear(128, data_dim))
+
         self.spatial_lin = nn.Sequential(nn.Linear(data_dim, data_dim//2),
                                          nn.ReLU(),
                                          nn.LayerNorm(data_dim//2),
@@ -168,6 +181,9 @@ class MapLess(nn.Module):
         self.spatial_tgt = nn.Parameter(torch.rand(128, data_dim).cuda(), requires_grad=True)
         num_l = 8
         self.spatial_tr = nn.Transformer(d_model=data_dim, nhead=4, num_encoder_layers=num_l, batch_first=True,
+                                         dim_feedforward=data_dim, dropout=0.01)
+
+        self.xyz_tr = nn.Transformer(d_model=data_dim, nhead=4, num_encoder_layers=num_l, batch_first=True,
                                          dim_feedforward=data_dim, dropout=0.01)
         self.spatial_tr_after = nn.Sequential(nn.Linear(data_dim, 128),
                                                nn.ReLU(),
@@ -205,6 +221,24 @@ class MapLess(nn.Module):
 
     def forward(self, data):
         bs = data["roadgraph_samples/xyz"].shape[0]
+
+        xyz = data["roadgraph_samples/xyz"].reshape(bs, -1, 3)[:, ::2, :2].cuda()
+
+        xyz = self.xyz_lin(xyz.reshape(bs, -1, 400))
+
+        ### fourier_encode ###
+        axis_pos = list(
+            map(lambda size: torch.linspace(-1., 1., steps=size, device="cuda"), xyz.shape[1:2]))
+        pos = torch.stack(torch.meshgrid(*axis_pos), dim=-1)
+        enc_pos = fourier_encode(pos, 10, 12)
+        enc_pos = rearrange(enc_pos, '... n d -> ... (n d)')
+        enc_pos = repeat(enc_pos, '... -> b ...', b=bs)
+        xyz = torch.cat((xyz, enc_pos.to(xyz.device)), dim=-1)
+        ### fourier_encode ###
+
+        tgt_xyz = self.xyz_tgt.unsqueeze(0).repeat(bs, 1, 1)
+        xyz = self.spatial_tr(xyz, tgt_xyz)
+        xyz = xyz.repeat(128, 1, 1)
 
 
         cur = torch.cat(
@@ -253,7 +287,7 @@ class MapLess(nn.Module):
         # temporal_out = rearrange(temporal_out, "(bs nump) time datadim -> bs nump time datadim", nump=128)
 
 
-        out, (_, _) = self.lstm(state_emb + temporal_out + spatial_outs)
+        out, (_, _) = self.lstm(state_emb + temporal_out + spatial_outs + xyz)
         out = self.lstm_past(out.reshape(bs*128, -1))
         # state = torch.cat([cur, past - cur], dim=2).reshape(bs*128, -1).cuda()
         # out = self.SIMPL(state)
