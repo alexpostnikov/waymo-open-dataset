@@ -120,8 +120,9 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
                         "min_ade": m_ade.item()})
             if len(losses) > 500:
                 losses = losses[100:]
-        image = vis_cur_and_fut(data, poses)
-        if (chank % 20) == 0:
+
+        if (chank % 200) == 0:
+            image = vis_cur_and_fut(data, poses)
             images = wandb.Image(image, caption="Top: Output, Bottom: Input")
             wandb.log({"examples": images})
     return losses
