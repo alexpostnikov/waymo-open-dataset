@@ -237,7 +237,8 @@ test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, n
 
 
 device = "cuda"
-net =MapLess(config.use_every_nth_prediction, config.exp_data_dim)
+net = MapLess(config.use_every_nth_prediction, config.exp_data_dim)
+net = torch.nn.DataParallel(net)
 # MultyModel(config.use_every_nth_prediction)
 # net = SimplModel()
 
