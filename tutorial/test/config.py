@@ -62,6 +62,9 @@ def build_parser():
         '--use_sgd', type="bool", default=False)
     parser.add_argument(
         '--exp_lr', type=float, default=3e-4)
+
+    parser.add_argument(
+        '--exp_data_dim', type=int, default=256)
     parser.add_argument(
         '--exp_num_lr_warmup_steps', type=int, default=1000)
     parser.add_argument(

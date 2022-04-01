@@ -237,7 +237,7 @@ train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size,
 test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, num_workers=0)
 
 device = "cuda"
-net =MapLess(config.use_every_nth_prediction)
+net =MapLess(config.use_every_nth_prediction, config.exp_data_dim)
 # MultyModel(config.use_every_nth_prediction)
 # net = SimplModel()
 optimizer = optim.Adam(net.parameters(), lr=wandb.config["learning_rate"])

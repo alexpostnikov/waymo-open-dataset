@@ -150,43 +150,40 @@ class MultyModel(nn.Module):
 
 
 class MapLess(nn.Module):
-    def __init__(self, use_every_nth_prediction):
+    def __init__(self, use_every_nth_prediction, data_dim = 128):
         super().__init__()
+        self.data_dim = data_dim
         self.use_every_nth_prediction = use_every_nth_prediction
 
-        self.spatial_lin = nn.Sequential(nn.Linear(2, 8),
-                                         nn.ReLU(),
-                                         nn.LayerNorm(8),
-                                         nn.Linear(8, 64))
-        self.spatial_tgt = nn.Parameter(torch.rand(128, 64).cuda(), requires_grad=True)
-        num_l = 8
-        self.spatial_tr = nn.Transformer(d_model=64, nhead=4, num_encoder_layers=num_l, batch_first=True,
-                                         dim_feedforward=64, dropout=0.01)
-
-        self.temporal_lin = nn.Sequential(nn.Linear(32, 8),
-                                          nn.ReLU(),
-                                          nn.LayerNorm(8),
-                                          nn.Linear(8, 64))
-        self.temporal_tgt = nn.Parameter(torch.rand(11, 64+25).cuda(), requires_grad=True)
-        self.temporal_tr = nn.Transformer(d_model=64+25, nhead=1, num_encoder_layers=num_l, batch_first=True,
-                                         dim_feedforward=64, dropout=0.01)
-
-
-        self.temporal_tr_after = nn.Sequential(nn.Linear(64+25, 128),
+        self.temporal_tr_after = nn.Sequential(nn.Linear(data_dim+25, 128),
                                           nn.ReLU(),
                                           nn.LayerNorm(128),
-                                          nn.Linear(128, 32))
-        # nn.Linear(64 + 25, 64)
-        self.tr = nn.Transformer(d_model=64, nhead=4, num_encoder_layers=num_l, batch_first=True,
-                                         dim_feedforward=64, dropout=0.01)  # .cuda()
+                                          nn.Linear(128, data_dim))
 
-        self.tr_tgt = nn.Parameter(torch.rand(80 // use_every_nth_prediction, 64).cuda(), requires_grad=True)
+        self.spatial_lin = nn.Sequential(nn.Linear(data_dim, data_dim//2),
+                                         nn.ReLU(),
+                                         nn.LayerNorm(data_dim//2),
+                                         nn.Linear(data_dim//2, data_dim-25))
 
-        self.dec_f = nn.Sequential(nn.Linear(80 // use_every_nth_prediction * 64, 512),
-                                   nn.ReLU(),
-                                   nn.LayerNorm(512),
-                                   nn.Linear(512, ((160 // self.use_every_nth_prediction) + 1) * 6))
-        self.lstm = nn.LSTM(66, 48, 1, batch_first=True)
+        self.spatial_tgt = nn.Parameter(torch.rand(128, data_dim).cuda(), requires_grad=True)
+        num_l = 8
+        self.spatial_tr = nn.Transformer(d_model=data_dim, nhead=4, num_encoder_layers=num_l, batch_first=True,
+                                         dim_feedforward=data_dim, dropout=0.01)
+        self.spatial_tr_after = nn.Sequential(nn.Linear(data_dim, 128),
+                                               nn.ReLU(),
+                                               nn.LayerNorm(128),
+                                               nn.Linear(128, data_dim))
+
+        self.temporal_lin = nn.Sequential(nn.Linear(data_dim, 8),
+                                          nn.ReLU(),
+                                          nn.LayerNorm(8),
+                                          nn.Linear(8, data_dim))
+        self.temporal_tgt = nn.Parameter(torch.rand(11, data_dim+25).cuda(), requires_grad=True)
+        self.temporal_tr = nn.Transformer(d_model=data_dim+25, nhead=1, num_encoder_layers=num_l, batch_first=True,
+                                         dim_feedforward=64, dropout=0.01)
+
+
+        # self.lstm = nn.LSTM(66, 48, 1, batch_first=True)
         self.confs = nn.Linear(12 * 80 // use_every_nth_prediction, 6)
         self.state_lin = nn.Linear(20,  80//use_every_nth_prediction * 2)
 
@@ -198,93 +195,46 @@ class MapLess(nn.Module):
                                    nn.ReLU(),
                                    nn.LayerNorm(8),
                                    # nn.BatchNorm1d(512),
-                                   nn.Linear(8, 32))
+                                   nn.Linear(8, data_dim))
 
-        self.lstm = nn.LSTM(32, 64, 1, batch_first=True)
+        self.lstm = nn.LSTM(data_dim, 64, 1, batch_first=True)
         self.lstm_past = nn.Sequential(nn.Linear(64*11, 512),
                                    nn.ReLU(),
                                    nn.LayerNorm(512),
-                                   # nn.BatchNorm1d(512),
                                     nn.Linear(512, ((160 // self.use_every_nth_prediction) + 1) * 6))
 
-        #
-        # self.SIMPL = nn.Sequential(nn.Linear(22, 512),
-        #                            nn.ReLU(),
-        #                            nn.LayerNorm(512),
-        #                            # nn.BatchNorm1d(512),
-        #                            nn.Linear(512, ((160 // self.use_every_nth_prediction) + 1) * 6))
     def forward(self, data):
         bs = data["roadgraph_samples/xyz"].shape[0]
-        if 0:
-            cur = torch.cat(
-                [data["state/current/x"].reshape(-1, 128, 1, 1), data["state/current/y"].reshape(-1, 128, 1, 1)], -1)
 
-            past = torch.cat([data["state/past/x"].reshape(-1, 128, 10, 1), data["state/past/y"].reshape(-1, 128, 10, 1)],
-                             -1)
-            # state = torch.cat([cur, past - cur], 1).permute(0, 2, 1, 3).reshape(-1, 128, 11 * 2).cuda()
-            state = torch.cat([cur, past], 2).cuda() - cur.cuda()
-            state_temporal = self.temporal_lin(rearrange(state, "bs nump time datadim -> (bs nump) time datadim"))
-            tgt_temporal = self.temporal_tgt.unsqueeze(0).repeat(bs * 128, 1, 1)
-
-            axis_pos = list(map(lambda size: torch.linspace(-1., 1., steps=size, device="cuda"), state_temporal.shape[1:2]))
-            pos = torch.stack(torch.meshgrid(*axis_pos), dim=-1)
-            enc_pos = fourier_encode(pos, 10, 12)
-            enc_pos = rearrange(enc_pos, '... n d -> ... (n d)')
-            enc_pos = repeat(enc_pos, '... -> b ...', b=bs*128)
-
-            state_temporal = torch.cat((state_temporal, enc_pos.to(state_temporal.device)), dim=-1)
-
-            temporal_out = self.temporal_tr(state_temporal, tgt_temporal)
-            temporal_out = self.temporal_tr_after(temporal_out)
-            temporal_out = rearrange(temporal_out, "(bs nump) time datadim -> bs nump time datadim", nump=128)
-
-            spatial_outs = torch.rand(bs, 128, 0, 64).cuda()
-            for timestemp in range(5):
-                state_spatial = state[:, :, timestemp*2, :]
-                state_spatial = self.spatial_lin(state_spatial)
-                tgt_spatial = self.spatial_tgt.unsqueeze(0).repeat(bs, 1, 1)
-                spatial_out = self.spatial_tr(state_spatial, tgt_spatial)
-                spatial_out = rearrange(spatial_out, "bs nump datadim -> bs nump 1 datadim")
-                spatial_outs = torch.cat([spatial_outs, spatial_out], dim=2)
-            out = torch.cat([spatial_outs, temporal_out], dim=2)
-            out = rearrange(out, "bs nump time datadim -> (bs nump) time datadim")
-
-            tr_tgt = self.tr_tgt.unsqueeze(0).repeat(bs * 128, 1, 1)
-            # print (tr_tgt.shape, out.shape)
-            out_tr = self.tr(out, tr_tgt)
-
-            # out_tr -> bs*128, 80//self.use_every_nth_prediction, 32
-            # out_tr = out_tr.reshape(bs * 128, -1)
-            # out = self.dec_f(out_tr)
-
-            h0 = cur.cuda().reshape(bs*128, 1, 2).permute(1, 0, 2).repeat(1, 1, 4*6).cuda() + 0  #.reshape() torch.randn(bs*128, 1, 2)
-            # c0 = torch.randn(1, bs*128, 12).cuda()
-            c0 = cur.cuda().reshape(bs * 128, 1, 2).permute(1, 0, 2).repeat(1, 1, 4*6).cuda() + 0
-
-            cur = torch.cat(
-                [data["state/current/x"].reshape(-1, 1, 128, 1), data["state/current/y"].reshape(-1, 1, 128, 1)], -1)
-            past = torch.cat([data["state/past/x"].reshape(-1, 128, 10, 1), data["state/past/y"].reshape(-1, 128, 10, 1)],
-                             -1).permute(0, 2, 1, 3)
-            state = (past - cur).permute(0, 2, 1, 3).reshape(bs*128, 10 * 2).cuda()
-
-            state_emb = self.state_lin(state).reshape(bs*128, 80//self.use_every_nth_prediction, 2)
-            # state -> bs, 128, 10, 2
-            # out_tr -> bs*128, 80//self.use_every_nth_prediction, 32
-            out, (_, _) = self.lstm(torch.cat([out_tr, state_emb],dim=2), (h0, c0))
-            out = out.reshape(bs, 128, 80//self.use_every_nth_prediction, 6, 8)
-            out = self.out_lin(out)
-            poses = out+0 #out[:,:,:, :-6].reshape(bs, 128, -1, 6, 2)
-            confs = self.confs(poses.reshape(bs, 128, -1))
-            confs = torch.nn.functional.softmax(confs, -1)
-            poses_cum = torch.cumsum(poses, 2)
 
         cur = torch.cat(
             [data["state/current/x"].reshape(-1, 128, 1, 1), data["state/current/y"].reshape(-1, 128, 1, 1)], -1)
 
         past = torch.cat([data["state/past/x"].reshape(-1, 128, 10, 1), data["state/past/y"].reshape(-1, 128, 10, 1)],
                          -1)  # .permute(0, 2, 1, 3)
-
         state_emb = self.lstm_pre(torch.cat([cur, past - cur], dim=2).reshape(bs * 128, 11, -1).cuda())
+
+        spatial_outs = torch.rand(bs, 128, 0, self.data_dim).cuda()
+        for timestemp in range(11):
+            state_spatial = state_emb.reshape(bs, 128, 11, -1)[:, :, timestemp, :] + 0
+            tgt_spatial = self.spatial_tgt.unsqueeze(0).repeat(bs, 1, 1)
+            state_spatial = self.spatial_lin(state_spatial)
+            axis_pos = list(
+                map(lambda size: torch.linspace(-1., 1., steps=size, device="cuda"), state_spatial.shape[1:2]))
+            pos = torch.stack(torch.meshgrid(*axis_pos), dim=-1)
+            enc_pos = fourier_encode(pos, 10, 12)
+            enc_pos = rearrange(enc_pos, '... n d -> ... (n d)')
+            enc_pos = repeat(enc_pos, '... -> b ...', b=bs)
+            state_spatial = torch.cat((state_spatial, enc_pos.to(state_spatial.device)), dim=-1)
+
+            spatial_out = self.spatial_tr(state_spatial, tgt_spatial)
+            spatial_out = rearrange(spatial_out, "bs nump datadim -> bs nump 1 datadim")
+            spatial_outs = torch.cat([spatial_outs, spatial_out], dim=2)
+
+        # out = rearrange(out, "bs nump time datadim -> (bs nump) time datadim")
+        # print(spatial_outs.shape)
+        spatial_outs = self.spatial_tr_after(spatial_outs)
+        spatial_outs = rearrange(spatial_outs, "bs nump time datadim -> (bs nump) time datadim")
         # state_emb -> bs, 128, 11, 32
         state = state_emb + 0 # torch.cat([cur, past], 2).cuda() - cur.cuda()
         state_temporal = self.temporal_lin(state) #rearrange(state, "bs nump time datadim -> (bs nump) time datadim"))
@@ -303,7 +253,7 @@ class MapLess(nn.Module):
         # temporal_out = rearrange(temporal_out, "(bs nump) time datadim -> bs nump time datadim", nump=128)
 
 
-        out, (_, _) = self.lstm(state_emb + temporal_out)
+        out, (_, _) = self.lstm(state_emb + temporal_out + spatial_outs)
         out = self.lstm_past(out.reshape(bs*128, -1))
         # state = torch.cat([cur, past - cur], dim=2).reshape(bs*128, -1).cuda()
         # out = self.SIMPL(state)
