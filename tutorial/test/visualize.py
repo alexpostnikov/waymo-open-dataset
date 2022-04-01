@@ -128,14 +128,15 @@ def vis_cur_and_fut(decoded_example, predictions=None, size_pixels=1000, bn=0):
     images = []
     s = current_states
     m = current_states_mask
+    prediction = None
     if predictions is not None:
-        predictions = predictions[bn].detach().cpu().numpy()
-        predictions[:, :1] = predictions[:, :1] + current_states
-        predictions = predictions.cumsum(1)
+        prediction = predictions[bn].detach().cpu().numpy()
+        prediction = prediction + current_states[:,np.newaxis]
+        # predictions = predictions.cumsum(1)
 
     future_states_mask *= np.repeat(data["state/tracks_to_predict"].reshape(128, 1), 80, axis=1)>0
     im = visualize_one_step_with_future(s[:, 0], m[:, 0], future_states, future_states_mask, roadgraph_xyz,
-                            'cur with fut', center_y, center_x, width, color_map, size_pixels, predictions=predictions)
+                            'cur with fut', center_y, center_x, width, color_map, size_pixels, predictions=prediction)
     return im
 
 
@@ -173,18 +174,20 @@ def visualize_one_step_with_future(states, mask, future_states, future_states_ma
             linewidths=0.2,
             color=colors,
         )
+    nump, timestamps, modalities, datadim = predictions.shape
     if predictions is not None:
-        for step in range(predictions.shape[1]):
-            masked_x = predictions[:, step, 0][future_states_mask[:, step]]
-            masked_y = predictions[:, step, 1][future_states_mask[:, step]]
-            colors = color_map[future_states_mask[:, step]]
-            ax.scatter(
-                masked_x,
-                masked_y,
-                marker='o',
-                linewidths=0.2,
-                color=colors,
-            )
+        for modality in range(modalities):
+            for step in range(timestamps):
+                masked_x = predictions[:, step, modality, 0][future_states_mask[:, step]]
+                masked_y = predictions[:, step, modality, 1][future_states_mask[:, step]]
+                colors = color_map[future_states_mask[:, step]]
+                ax.scatter(
+                    masked_x,
+                    masked_y,
+                    marker='o',
+                    linewidths=0.1,
+                    color=colors,
+                )
 
     # Title.
     ax.set_title(title)
