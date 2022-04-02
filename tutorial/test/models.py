@@ -167,6 +167,13 @@ class MapLess(nn.Module):
                                          nn.ReLU(),
                                          nn.LayerNorm(data_dim//2),
                                          nn.Linear(data_dim//2, data_dim-25))
+        self.xyz_lin1 = nn.Sequential(nn.Linear(800, 512),
+                                         nn.ReLU(),
+                                         nn.LayerNorm(512),
+                                         nn.Linear(512, data_dim//2),
+                                         nn.ReLU(),
+                                         nn.LayerNorm(data_dim//2),
+                                         nn.Linear(data_dim//2, data_dim-25))
         self.xyz_tgt = nn.Parameter(torch.rand(11, data_dim).cuda(), requires_grad=True)
         self.xyz_tr_after = nn.Sequential(nn.Linear(data_dim, 128),
                                               nn.ReLU(),
@@ -224,20 +231,21 @@ class MapLess(nn.Module):
 
         xyz = data["roadgraph_samples/xyz"].reshape(bs, -1, 3)[:, ::2, :2].cuda()
 
-        xyz = self.xyz_lin(xyz.reshape(bs, -1, 400))
+        xyz_emb = self.xyz_lin(xyz.reshape(bs, -1, 400))
+        xyz_emb += self.xyz_lin1(xyz.reshape(bs, -1, 800)).repeat(1,2,1)
 
         ### fourier_encode ###
         axis_pos = list(
-            map(lambda size: torch.linspace(-1., 1., steps=size, device="cuda"), xyz.shape[1:2]))
+            map(lambda size: torch.linspace(-1., 1., steps=size, device="cuda"), xyz_emb.shape[1:2]))
         pos = torch.stack(torch.meshgrid(*axis_pos), dim=-1)
         enc_pos = fourier_encode(pos, 10, 12)
         enc_pos = rearrange(enc_pos, '... n d -> ... (n d)')
         enc_pos = repeat(enc_pos, '... -> b ...', b=bs)
-        xyz = torch.cat((xyz, enc_pos.to(xyz.device)), dim=-1)
+        xyz_emb = torch.cat((xyz_emb, enc_pos.to(xyz_emb.device)), dim=-1)
         ### fourier_encode ###
 
         tgt_xyz = self.xyz_tgt.unsqueeze(0).repeat(bs, 1, 1)
-        xyz = self.spatial_tr(xyz, tgt_xyz)
+        xyz = self.xyz_tr(xyz_emb, tgt_xyz)
         xyz = xyz.repeat(128, 1, 1)
 
 
