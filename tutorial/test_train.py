@@ -29,6 +29,7 @@ import numpy as np
 import wandb
 import random
 import torch.optim as optim
+from transformers import get_cosine_schedule_with_warmup
 
 parser = build_parser()
 config = parser.parse_args()
@@ -243,6 +244,12 @@ net = torch.nn.DataParallel(net)
 # net = SimplModel()
 
 optimizer = optim.Adam(net.parameters(), lr=wandb.config["learning_rate"])
+num_epochs = 3
+scheduler = get_cosine_schedule_with_warmup(
+            optimizer=optimizer,
+            num_warmup_steps=1000,
+            num_training_steps=(60000*64 / config.exp_batch_size) * num_epochs,
+            num_cycles=0.45) ## 0.45 instead of 0.5 for no going to 0 LR
 net = net.to(device)
 
 # data = next(iter(dataset))
@@ -282,7 +289,7 @@ def overfit_test(model, loader, optimizer):
     plt.imshow(im)
 
 train_multymodal(net, (train_loader, test_loader), optimizer, checkpointer=checkpointer, num_ep=wandb.config["epochs"],
-                 logger=wandb, use_every_nth_prediction=config.use_every_nth_prediction)
+                 logger=wandb, use_every_nth_prediction=config.use_every_nth_prediction, scheduler=scheduler)
 
 print("done")
 print("done")

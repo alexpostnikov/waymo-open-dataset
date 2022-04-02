@@ -34,11 +34,11 @@ def train(model, loader, optimizer, num_ep=10):
 
 
 def train_multymodal(model, loaders, optimizer, num_ep=10, checkpointer=None, logger=None,
-                     use_every_nth_prediction=1):
+                     use_every_nth_prediction=1, scheduler=None):
 
     train_loader, test_loader = loaders
     for epoch in range(num_ep):  # loop over the dataset multiple times
-        train_losses = train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_prediction)
+        train_losses = train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_prediction, scheduler)
         # test_losses = test_epoch(epoch, logger, model, test_loader)
         checkpointer.save(epoch, train_losses.mean().item())
 
@@ -75,7 +75,7 @@ def test_epoch(epoch, logger, model, test_loader, max_chanks=100):
                 losses = losses[100:]
     return losses
 
-def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_prediction=1):
+def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_prediction=1, scheduler=None):
     losses = torch.rand(0)
     mades = torch.rand(0)
     pbar = tqdm(train_loader)
@@ -110,6 +110,11 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
         loss.backward()
 
         optimizer.step()
+        if scheduler is not None:
+            scheduler.step()
+            my_lr = scheduler.get_last_lr()
+            logger.log({"LR": my_lr[0]})
+
         with torch.no_grad():
             losses = torch.cat([losses, torch.tensor([loss_nll.detach().item()])], 0)
             mades = torch.cat([mades, torch.tensor([m_ade.detach().item()])], 0)
