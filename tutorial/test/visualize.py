@@ -176,16 +176,33 @@ def visualize_one_step_with_future(states, mask, future_states, future_states_ma
         )
     nump, timestamps, modalities, datadim = predictions.shape
     if predictions is not None:
-        for modality in range(modalities):
-            for step in range(timestamps):
-                masked_x = predictions[:, step, modality, 0][future_states_mask[:, step]]
-                masked_y = predictions[:, step, modality, 1][future_states_mask[:, step]]
-                colors = color_map[future_states_mask[:, step]]
-                ax.scatter(
-                    masked_x,
-                    masked_y,
-                    marker='o',
-                    linewidths=0.1,
+
+
+        for ped in range(128):
+            if not future_states_mask[ped, step]:
+                continue
+            for modality in range(modalities):
+                maskeds_x = []
+                maskeds_y = []
+                for step in range(timestamps):
+                    if [future_states_mask[ped, step]]:
+                        masked_x = predictions[ped, step, modality, 0]
+                        masked_y = predictions[ped, step, modality, 1]
+                        maskeds_x.append(masked_x)
+                        maskeds_y.append(masked_y)
+                        colors = color_map[ped]
+                    # ax.scatter(
+                    #     masked_x,
+                    #     masked_y,
+                    #     marker='o',
+                    #     linewidths=0.05,
+                    #     color=colors,
+                    # )
+                ax.plot(
+                    maskeds_x,
+                    maskeds_y,
+                    # marker='o',
+                    linewidth=0.5,
                     color=colors,
                 )
 
