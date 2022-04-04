@@ -118,7 +118,7 @@ def visualize_one_step(states,
     return image
 
 
-def vis_cur_and_fut(decoded_example, predictions=None, size_pixels=1000, bn=0):
+def vis_cur_and_fut(decoded_example, predictions=None, size_pixels=1000, bn=0, confs=None):
     data = {}
     for key in decoded_example.keys():
         data[key] = decoded_example[key][bn].detach().cpu().numpy()
@@ -136,12 +136,13 @@ def vis_cur_and_fut(decoded_example, predictions=None, size_pixels=1000, bn=0):
 
     future_states_mask *= np.repeat(data["state/tracks_to_predict"].reshape(128, 1), 80, axis=1)>0
     im = visualize_one_step_with_future(s[:, 0], m[:, 0], future_states, future_states_mask, roadgraph_xyz,
-                            'cur with fut', center_y, center_x, width, color_map, size_pixels, predictions=prediction)
+                            'cur with fut', center_y, center_x, width, color_map, size_pixels,
+                                        predictions=prediction, confs=confs[bn])
     return im
 
 
 def visualize_one_step_with_future(states, mask, future_states, future_states_mask, roadgraph, title,
-                                   center_y, center_x, width, color_map, size_pixels=1000, predictions=None):
+                                   center_y, center_x, width, color_map, size_pixels=1000, predictions=None, confs=None):
     """Generate visualization for a single step."""
 
     # Create figure and axes.
@@ -163,28 +164,36 @@ def visualize_one_step_with_future(states, mask, future_states, future_states_ma
         linewidths=4,
         color=colors,
     )
-    for step in range(future_states.shape[1]):
-        masked_x = future_states[:, step, 0][future_states_mask[:,step]]
-        masked_y = future_states[:, step, 1][future_states_mask[:,step]]
-        colors = color_map[future_states_mask[:,step]]*0.2 + np.array([0,0,0,0.3])
-        ax.scatter(
-            masked_x,
-            masked_y,
-            marker='o',
-            linewidths=0.2,
+    for ped in range(128):
+
+        maskeds_x = []
+        maskeds_y = []
+        for step in range(future_states.shape[1]):
+            if not future_states_mask[ped,step]:
+                continue
+            masked_x = future_states[ped, step, 0] #[future_states_mask[:,step]]
+            masked_y = future_states[ped, step, 1] #[future_states_mask[:,step]]
+            maskeds_x.append(masked_x)
+            maskeds_y.append(masked_y)
+        colors = color_map[ped] #+ np.array([0.3,0.3,0.3,0.3])
+        ax.plot(
+            maskeds_x,
+            maskeds_y,
+            # marker='o',
+            linewidth=3,
             color=colors,
         )
     nump, timestamps, modalities, datadim = predictions.shape
     if predictions is not None:
-
-
         for ped in range(128):
-            if not future_states_mask[ped, step]:
+            if future_states_mask[ped].sum() == 0:
                 continue
             for modality in range(modalities):
                 maskeds_x = []
                 maskeds_y = []
                 for step in range(timestamps):
+                    if not future_states_mask[ped, step]:
+                        continue
                     if [future_states_mask[ped, step]]:
                         masked_x = predictions[ped, step, modality, 0]
                         masked_y = predictions[ped, step, modality, 1]
@@ -198,13 +207,17 @@ def visualize_one_step_with_future(states, mask, future_states, future_states_ma
                     #     linewidths=0.05,
                     #     color=colors,
                     # )
+
+                conf = confs[ped, modality].detach().cpu().item()
                 ax.plot(
                     maskeds_x,
                     maskeds_y,
                     # marker='o',
-                    linewidth=0.5,
-                    color=colors,
+                    linewidth=3*conf,
+                    color=colors - np.array([0, 0, 0, conf]),
                 )
+                ax.text(maskeds_x[-1], maskeds_y[-1], f"{conf:.2f}",
+                        fontsize="xx-small")
 
     # Title.
     ax.set_title(title)
