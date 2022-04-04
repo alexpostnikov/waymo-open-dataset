@@ -244,11 +244,10 @@ net = torch.nn.DataParallel(net)
 # net = SimplModel()
 
 optimizer = optim.Adam(net.parameters(), lr=wandb.config["learning_rate"])
-num_epochs = 3
 scheduler = get_cosine_schedule_with_warmup(
             optimizer=optimizer,
             num_warmup_steps=1000,
-            num_training_steps=(60000*64 / config.exp_batch_size) * num_epochs,
+            num_training_steps=(22000*128 / config.exp_batch_size) * wandb.config["epochs"],
             num_cycles=0.45) ## 0.45 instead of 0.5 for no going to 0 LR
 net = net.to(device)
 

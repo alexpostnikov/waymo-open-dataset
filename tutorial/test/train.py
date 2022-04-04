@@ -106,7 +106,7 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
         #                            confs.reshape(bs*128, 6))[
         #     (mask.sum(2) == 80).reshape(-1)].mean()
         m_ade = m_ades[mask[:, :, ::use_every_nth_prediction] > 0].mean()
-        loss = m_ade + 0.1 * loss_nll
+        loss = m_ade + 1. * loss_nll
         loss.backward()
 
         optimizer.step()
