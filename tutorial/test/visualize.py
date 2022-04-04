@@ -180,8 +180,15 @@ def visualize_one_step_with_future(states, mask, future_states, future_states_ma
             maskeds_x,
             maskeds_y,
             # marker='o',
-            linewidth=3,
+            linewidth=4,
             color=colors,
+        )
+        ax.plot(
+            maskeds_x,
+            maskeds_y,
+            # marker='o',
+            linewidth=2,
+            color=np.array([181, 179, 92, 255])/255.,
         )
     nump, timestamps, modalities, datadim = predictions.shape
     if predictions is not None:
