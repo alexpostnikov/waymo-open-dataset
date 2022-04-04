@@ -5,6 +5,7 @@ from einops import rearrange, repeat
 from numpy import pi
 import torch.nn.functional
 from test.perciever import Perceiver
+from test.pointNet import PointNetfeat
 
 
 def fourier_encode(x, max_freq, num_bands=4):
@@ -154,7 +155,7 @@ class MapLess(nn.Module):
         super().__init__()
         self.data_dim = data_dim
         self.use_every_nth_prediction = use_every_nth_prediction
-
+        self.pointNet = PointNetfeat(global_feat=True)
         self.temporal_tr_after = nn.Sequential(nn.Linear(data_dim+25, 128),
                                           nn.ReLU(),
                                           nn.LayerNorm(128),
@@ -190,7 +191,7 @@ class MapLess(nn.Module):
         self.spatial_tr = nn.Transformer(d_model=data_dim, nhead=4, num_encoder_layers=num_l, batch_first=True,
                                          dim_feedforward=data_dim, dropout=0.01)
 
-        self.xyz_tr = nn.Transformer(d_model=data_dim, nhead=4, num_encoder_layers=num_l, batch_first=True,
+        self.xyz_tr = nn.Transformer(d_model=2*data_dim, nhead=4, num_encoder_layers=num_l, batch_first=True,
                                          dim_feedforward=data_dim, dropout=0.01)
         self.spatial_tr_after = nn.Sequential(nn.Linear(data_dim, 128),
                                                nn.ReLU(),
@@ -226,27 +227,13 @@ class MapLess(nn.Module):
                                    nn.LayerNorm(512),
                                     nn.Linear(512, ((160 // self.use_every_nth_prediction) + 1) * 6))
 
+
     def forward(self, data):
         bs = data["roadgraph_samples/xyz"].shape[0]
 
-        xyz = data["roadgraph_samples/xyz"].reshape(bs, -1, 3)[:, ::2, :2].cuda()
-
-        xyz_emb = self.xyz_lin(xyz.reshape(bs, -1, 400))
-        xyz_emb += self.xyz_lin1(xyz.reshape(bs, -1, 800)).repeat(1,2,1)
-
-        ### fourier_encode ###
-        axis_pos = list(
-            map(lambda size: torch.linspace(-1., 1., steps=size, device="cuda"), xyz_emb.shape[1:2]))
-        pos = torch.stack(torch.meshgrid(*axis_pos), dim=-1)
-        enc_pos = fourier_encode(pos, 10, 12)
-        enc_pos = rearrange(enc_pos, '... n d -> ... (n d)')
-        enc_pos = repeat(enc_pos, '... -> b ...', b=bs)
-        xyz_emb = torch.cat((xyz_emb, enc_pos.to(xyz_emb.device)), dim=-1)
-        ### fourier_encode ###
-
-        tgt_xyz = self.xyz_tgt.unsqueeze(0).repeat(bs, 1, 1)
-        xyz = self.xyz_tr(xyz_emb, tgt_xyz)
-        xyz = xyz.repeat(128, 1, 1)
+        xyz = data["roadgraph_samples/xyz"].reshape(bs, -1, 3)[:, ::2].cuda()
+        masks = data["state/tracks_to_predict"].reshape(-1, 128) > 0
+        xyz_emb = self.pointNet(xyz.permute(0, 2, 1))
 
 
         cur = torch.cat(
@@ -254,11 +241,13 @@ class MapLess(nn.Module):
 
         past = torch.cat([data["state/past/x"].reshape(-1, 128, 10, 1), data["state/past/y"].reshape(-1, 128, 10, 1)],
                          -1)  # .permute(0, 2, 1, 3)
-        state_emb = self.lstm_pre(torch.cat([cur, past - cur], dim=2).reshape(bs * 128, 11, -1).cuda())
+        state_emb = self.lstm_pre(torch.cat([cur, past], dim=2).reshape(bs * 128, 11, -1).cuda())
 
-        spatial_outs = torch.rand(bs, 128, 0, self.data_dim).cuda()
-        for timestemp in range(11):
-            state_spatial = state_emb.reshape(bs, 128, 11, -1)[:, :, timestemp, :] + 0
+        spatial_outs = torch.zeros(bs, 128, self.data_dim).cuda()
+
+        # spatial_out = torch.zeros(bs, 128, )
+        for timestemp in range(2):
+            state_spatial = state_emb.reshape(bs, 128, 11, -1)[:, :, timestemp*5, :] + 0
             tgt_spatial = self.spatial_tgt.unsqueeze(0).repeat(bs, 1, 1)
             state_spatial = self.spatial_lin(state_spatial)
             axis_pos = list(
@@ -270,13 +259,13 @@ class MapLess(nn.Module):
             state_spatial = torch.cat((state_spatial, enc_pos.to(state_spatial.device)), dim=-1)
 
             spatial_out = self.spatial_tr(state_spatial, tgt_spatial)
-            spatial_out = rearrange(spatial_out, "bs nump datadim -> bs nump 1 datadim")
-            spatial_outs = torch.cat([spatial_outs, spatial_out], dim=2)
+            # spatial_out = rearrange(spatial_out, "bs nump datadim -> bs nump 1 datadim")
+            spatial_outs += spatial_out
 
         # out = rearrange(out, "bs nump time datadim -> (bs nump) time datadim")
         # print(spatial_outs.shape)
         spatial_outs = self.spatial_tr_after(spatial_outs)
-        spatial_outs = rearrange(spatial_outs, "bs nump time datadim -> (bs nump) time datadim")
+        spatial_outs = rearrange(spatial_outs, "bs nump  datadim -> (bs nump) 1 datadim")
         # state_emb -> bs, 128, 11, 32
         state = state_emb + 0 # torch.cat([cur, past], 2).cuda() - cur.cuda()
         state_temporal = self.temporal_lin(state) #rearrange(state, "bs nump time datadim -> (bs nump) time datadim"))
@@ -292,13 +281,11 @@ class MapLess(nn.Module):
 
         temporal_out = self.temporal_tr(state_temporal, tgt_temporal)
         temporal_out = self.temporal_tr_after(temporal_out)
-        # temporal_out = rearrange(temporal_out, "(bs nump) time datadim -> bs nump time datadim", nump=128)
 
-
-        out, (_, _) = self.lstm(state_emb + temporal_out + spatial_outs + xyz)
+        out, (_, _) = self.lstm(state_emb + temporal_out + spatial_outs)
+        out = self.xyz_tr(xyz_emb[0].unsqueeze(1).repeat(128, 1, 1).reshape(bs*128, -1, 64), out)
         out = self.lstm_past(out.reshape(bs*128, -1))
-        # state = torch.cat([cur, past - cur], dim=2).reshape(bs*128, -1).cuda()
-        # out = self.SIMPL(state)
+
         poses = out[..., :-6].reshape(bs, 128, -1, 6, 2)
         confs = torch.nn.functional.softmax(out[..., -6:].reshape(bs, 128, 6), -1)
         poses_cum = torch.cumsum(poses, 2)
