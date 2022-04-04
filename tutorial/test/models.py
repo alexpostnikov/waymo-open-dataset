@@ -191,8 +191,7 @@ class MapLess(nn.Module):
         self.spatial_tr = nn.Transformer(d_model=data_dim, nhead=4, num_encoder_layers=num_l, batch_first=True,
                                          dim_feedforward=data_dim, dropout=0.01)
 
-        self.xyz_tr = nn.Transformer(d_model=2*data_dim, nhead=4, num_encoder_layers=num_l, batch_first=True,
-                                         dim_feedforward=data_dim, dropout=0.01)
+
         self.spatial_tr_after = nn.Sequential(nn.Linear(data_dim, 128),
                                                nn.ReLU(),
                                                nn.LayerNorm(128),
@@ -222,6 +221,8 @@ class MapLess(nn.Module):
                                    nn.Linear(8, data_dim))
 
         self.lstm = nn.LSTM(data_dim, 64, 1, batch_first=True)
+        self.xyz_tr = nn.Transformer(d_model=self.lstm.hidden_size, nhead=4, num_encoder_layers=num_l, batch_first=True,
+                                         dim_feedforward=data_dim, dropout=0.01)
         self.lstm_past = nn.Sequential(nn.Linear(64*11, 512),
                                    nn.ReLU(),
                                    nn.LayerNorm(512),
