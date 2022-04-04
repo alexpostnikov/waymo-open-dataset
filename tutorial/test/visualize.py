@@ -214,7 +214,7 @@ def visualize_one_step_with_future(states, mask, future_states, future_states_ma
                     maskeds_y,
                     # marker='o',
                     linewidth=3*conf,
-                    color=colors - np.array([0, 0, 0, conf]),
+                    color=colors - np.array([0, 0, 0, 1-conf]),
                 )
                 ax.text(maskeds_x[-1], maskeds_y[-1], f"{conf:.2f}",
                         fontsize="xx-small")
