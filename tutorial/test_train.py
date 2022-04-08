@@ -29,7 +29,7 @@ import numpy as np
 import wandb
 import random
 import torch.optim as optim
-from transformers import get_cosine_schedule_with_warmup
+from transformers import get_cosine_schedule_with_warmup, get_cosine_with_hard_restarts_schedule_with_warmup
 
 parser = build_parser()
 config = parser.parse_args()
@@ -244,11 +244,11 @@ net = torch.nn.DataParallel(net)
 # net = SimplModel()
 
 optimizer = optim.Adam(net.parameters(), lr=wandb.config["learning_rate"])
-scheduler = get_cosine_schedule_with_warmup(
+scheduler = get_cosine_with_hard_restarts_schedule_with_warmup(
             optimizer=optimizer,
-            num_warmup_steps=1000,
+            num_warmup_steps=2000,
             num_training_steps=(22000*128 / config.exp_batch_size) * wandb.config["epochs"],
-            num_cycles=0.45) ## 0.45 instead of 0.5 for no going to 0 LR
+            num_cycles=wandb.config["epochs"]) 
 net = net.to(device)
 
 # data = next(iter(dataset))
