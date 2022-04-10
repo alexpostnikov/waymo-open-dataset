@@ -414,27 +414,28 @@ class AttPredictorPecNet(nn.Module):
         state = torch.cat([poses, velocities], dim=-1)
         state_masked = state.reshape(bs, 128, 11, -1)[masks]
         rot_mat = self.create_rot_matrix(state_masked)
+        rot_mat_inv = torch.inverse(rot_mat)
         ### rotate velocicites state
         vel_expanded = torch.cat([state_masked[:, :, 2:], torch.ones_like(state_masked[:, :, :1])], -1)
-        state_masked[:, :, 2:] = torch.bmm(rot_mat, vel_expanded.permute(0, 2, 1)).permute(0, 2, 1)[:,:,:2]
+        state_masked[:, :, 2:] = torch.bmm(rot_mat_inv, vel_expanded.permute(0, 2, 1)).permute(0, 2, 1)[:,:,:2]
         # state_masked[:, : , 2:] = rot_mat @ state_masked[:, : 2, :]
         ### rotate cur state
         state_expanded = torch.cat([state_masked[:, :, :2], torch.ones_like(state_masked[:, :, :1])], -1)
-        state_masked[:, :, :2] = torch.bmm(rot_mat, state_expanded.permute(0, 2, 1)).permute(0, 2, 1)[:, :, :2]
+        state_masked[:, :, :2] = torch.bmm(rot_mat_inv, state_expanded.permute(0, 2, 1)).permute(0, 2, 1)[:, :, :2]
 
 
         agent_h_emb = self.embeder(state_masked)
 
         # pointnet embedder
 
-        xyz = data["roadgraph_samples/xyz"].reshape(bs, -1, 3)[:, ::50].cuda()
+        xyz = data["roadgraph_samples/xyz"].reshape(bs, -1, 3)[:, ::2].cuda()
         xyz_personal = torch.zeros([0, xyz.shape[1], xyz.shape[2]], device=xyz.device)
         ## rotate pointclouds
         # ...
         for i, index in enumerate(masks.nonzero()):
             xyz_p = torch.ones([xyz.shape[1], xyz.shape[2]], device=xyz.device)
             xyz_p[:, :2] = xyz[index[0], :, :2] - cur[index[0], index[1], 0]
-            xyz_p = (rot_mat[i] @ xyz_p.T).T
+            xyz_p = (rot_mat_inv[i] @ xyz_p.T).T
             xyz_personal = torch.cat((xyz_personal, xyz_p.unsqueeze(0)), dim=0)
         xyz_emb, _, _ = self.pointNet(xyz_personal.permute(0, 2, 1))
         # xyz_emb = xyz_emb.repeat(8, 1)
@@ -446,7 +447,7 @@ class AttPredictorPecNet(nn.Module):
         goals = gmm.mean
         predictions, confidences = self.decoder_trajs(x, goals)
         ps = predictions.shape
-        predictions_exp = torch.bmm(torch.inverse(rot_mat),
+        predictions_exp = torch.bmm(rot_mat,
                   torch.cat([predictions, torch.ones_like(predictions[:, :, :, :1])], -1).permute(0, 3, 1, 2).reshape(
                       ps[0], 3, -1)).reshape(ps[0], 3, ps[1], -1).permute(0, 2, 3, 1)[:,:,:,:2]
         return predictions.permute(0, 2, 1, 3).unsqueeze(1), confidences #, gmm, x, goal_vector

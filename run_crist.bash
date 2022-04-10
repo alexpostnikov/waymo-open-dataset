@@ -1,0 +1,1 @@
+python tutorial/test_train.py --epoch_to_load=-1 --exp_lr=0.00003 --dir_data=/home/jovyan/uncompressed/tf_example --exp_batch_size=32 --use_every_nth_prediction=1 --exp_data_dim=128 --exp_num_epochs=10
