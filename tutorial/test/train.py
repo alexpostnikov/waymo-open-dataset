@@ -95,17 +95,19 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
         m_ades = torch.min(m_ades, dim=1).values
 
         valid = get_valid_data_mask(data, check_cur=1)
-        mask = (data["state/tracks_to_predict"].reshape(-1, 128, 1).repeat(1, 1, 80) > 0) * (valid > 0)
+        mask = data["state/tracks_to_predict"].reshape(-1, 128, 1) #.repeat(1, 1, 80) > 0) * (valid > 0)
         gt_fut = get_future(data).to(poses.device)
         gt = rearrange(gt_fut, "bs timestemps num_peds data_dim -> (bs num_peds) timestemps data_dim")[:, ::use_every_nth_prediction]
+        gt = get_future(data).to(poses.device).permute(0,2,1,3)[mask[:,:,0]>0]
         cur = get_current(data).to(poses.device)
-        poses_moved = cur.permute(0, 2, 1, 3).unsqueeze(3).repeat(1, 1, 1, 6, 1) + poses
-        #(mask.sum(2) == 80).reshape(-1)
-        # log_likelihood(gt.unsqueeze(1), poses_moved.reshape(512, 4, 6, 2).permute(0, 2, 1, 3), confs.reshape(512, 6))
-        loss_nll = -log_likelihood(gt.unsqueeze(1), poses_moved.reshape(bs*128, -1, 6, 2).permute(0, 2, 1, 3),
-                                   confs.reshape(bs*128, 6))[
-            (mask.sum(2) == 80).reshape(-1)].mean()
-        m_ade = m_ades[mask[:, :, ::use_every_nth_prediction] > 0].mean()
+        poses_moved = cur.permute(0, 2, 1, 3)[mask>0].unsqueeze(1).repeat(1, 6,  1).unsqueeze(1).unsqueeze(1) + poses
+
+        fut_valid = data["state/future/valid"].reshape(-1, 128, 80)[mask[:,:,0] > 0].unsqueeze(2).to(poses_moved.device)
+
+        loss_nll = -log_likelihood(gt.unsqueeze(2) * fut_valid.unsqueeze(-1),
+                                   poses_moved[:, 0] * fut_valid.unsqueeze(-1),
+                                   confs).mean()
+        m_ade = m_ades.mean()
         loss = m_ade + 1. * loss_nll
         loss.backward()
 
@@ -120,28 +122,34 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
             mades = torch.cat([mades, torch.tensor([m_ade.detach().item()])], 0)
             pbar.set_description("ep %s chank %s" % (epoch, chank))
             pbar.set_postfix({"loss": losses.mean().item(), "m_ade": mades.mean().item(),
-                              "predicted": (mask[:, :, ::use_every_nth_prediction].sum(2)/poses.shape[2]).sum().item()})
+                              # "predicted": (mask[:, :, ::use_every_nth_prediction].sum(2)/poses.shape[2]).sum().item()
+                              })
             logger.log({"loss": loss_nll,
                         "min_ade": m_ade.item()})
             if len(losses) > 500:
                 losses = losses[100:]
 
-        if (chank % 200) == 0:
-            image = vis_cur_and_fut(data, poses, confs=confs)
-            images = wandb.Image(image, caption="Top: Output, Bottom: Input")
-            wandb.log({"examples": images})
+        # if (chank % 200) == 0:
+        #     image = vis_cur_and_fut(data, poses, confs=confs)
+        #     images = wandb.Image(image, caption="Top: Output, Bottom: Input")
+        #     wandb.log({"examples": images})
     return losses
 
 
 def uni_ade_poses(data, predictions, use_every_nth_prediction=1):
     bs, num_ped, future_steps, _ = predictions.shape
     gt_fut = get_future(data).to(predictions.device)[:, ::use_every_nth_prediction]
-    assert gt_fut.shape == torch.Size([bs, future_steps, num_ped, 2])
+    mask = data["state/tracks_to_predict"].reshape(-1, 128)#.repeat(1, 1, 80) > 0)
+    gt_fut = gt_fut.permute(0, 2, 1, 3)[mask > 0]
+    # assert gt_fut.shape == torch.Size([bs, future_steps, num_ped, 2])
 
     cur = get_current(data).to(predictions.device)
-    assert cur.shape == torch.Size([bs, 1, num_ped, 2])
-    pred_moved = predictions + cur.permute(0, 2, 1, 3)
-    dist = torch.norm((pred_moved - gt_fut.permute(0, 2, 1, 3)), dim=-1)
+    cur = cur.permute(0, 2, 1, 3)[mask > 0]#[:,0,:]
+    # assert cur.shape == torch.Size([bs, 1, num_ped, 2])
+    gt_fut = gt_fut - cur
+    fut_valid = data["state/future/valid"].reshape(-1,128, 80)[mask>0].unsqueeze(2).to(predictions.device)
+    err = (predictions[:, 0] - gt_fut) * fut_valid
+    dist = torch.norm(err, dim=-1)
     return dist
 
 
@@ -254,10 +262,11 @@ def log_likelihood(ground_truth, predicted, weights, sigma=1.0):
 #     print(ground_truth.shape,  predicted.shape)
     displacement_norms_squared = torch.sum((ground_truth - predicted) ** 2, dim=-1)
 #     print(displacement_norms_squared)
+
     displacement_norms_squared = torch.clamp(displacement_norms_squared, max=1e6)
     normalizing_const = np.log(2 * np.pi * sigma ** 2)
     lse_args = torch.log(weights + 1e-6) - torch.sum(
-        normalizing_const + 0.5 * displacement_norms_squared / sigma ** 2, dim=-1)
+        normalizing_const + 0.5 * displacement_norms_squared.permute(0,2,1) / sigma ** 2, dim=-1)
     if ground_truth.ndim == 4:
         max_arg = lse_args.max(1).values.reshape(-1,1)
     else:

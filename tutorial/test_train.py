@@ -8,6 +8,7 @@
 import tensorflow as tf
 
 from test.models import Model, SimplModel, MultyModel, PercieverBased, MapLess
+from test.iab import AttPredictorPecNet
 from test.train import train, train_multymodal
 from test.visualize import vis_cur_and_fut
 from test.train import get_speed_ade_with_mask, get_ade_from_pred_speed_with_mask
@@ -238,7 +239,8 @@ test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, n
 
 
 device = "cuda"
-net = MapLess(config.use_every_nth_prediction, config.exp_data_dim)
+# net = MapLess(config.use_every_nth_prediction, config.exp_data_dim)
+net = AttPredictorPecNet(embed_dim=1024, out_modes=6, out_horiz=80//config.use_every_nth_prediction)
 net = torch.nn.DataParallel(net)
 # MultyModel(config.use_every_nth_prediction)
 # net = SimplModel()
