@@ -354,7 +354,7 @@ class DecoderTraj2(nn.Module):
     def forward(self, hist_enc, goal):
         bs = hist_enc.shape[0]
         goal_embedded = self.goal_embeder(goal)
-        inp = torch.cat((hist_enc, goal_embedded.unsqueeze(1).repeat(1, hist_enc.shape[1], 1)), dim=2)
+        inp = torch.cat((hist_enc, goal_embedded), dim=2)
         inp_k = self.k_mlp(inp)
         inp_q = self.q_mlp(inp)
         inp_v = self.v_mlp(inp)
@@ -386,10 +386,10 @@ class AttPredictorPecNet(nn.Module):
                  dr_rate=0.3, use_vis=True):
         super().__init__()
         self.pointNet = PointNetfeat(global_feat=True)
-        self.latent = nn.Parameter(torch.rand(10, embed_dim + 16))
+        self.latent = nn.Parameter(torch.rand(out_modes, embed_dim + 16))
         self.embeder = InitEmbedding(inp_dim=4, out_dim=embed_dim)
         self.encoder = Encoder(inp_dim, embed_dim, num_blocks, use_vis=use_vis, dr_rate=dr_rate)
-        self.decoder_goals = DecoderGoals(embed_dim, 12, 20, dr_rate=dr_rate)
+        self.decoder_goals = DecoderGoals(embed_dim, 12, out_modes, dr_rate=dr_rate)
         self.decoder_trajs = DecoderTraj2(embed_dim, 12, out_modes, out_dim, out_horiz, dr_rate)
 
 
@@ -445,14 +445,15 @@ class AttPredictorPecNet(nn.Module):
         x = self.latent.unsqueeze(0).repeat(bsr, 1, 1)
         x = self.encoder(x, xyz_emb, agent_h_emb)
         gmm, goal_vector = self.decoder_goals(x)
-        goals = gmm.mean
+        #goals = gmm.mean
+        goals = gmm.component_distribution.mean
         predictions, confidences = self.decoder_trajs(x, goals)
         ps = predictions.shape
         predictions_exp = torch.bmm(rot_mat_inv,
                       torch.cat([predictions, torch.ones_like(predictions[:, :, :, :1])], -1).permute(0, 3, 1, 2).reshape(
                       ps[0], 3, -1)).reshape(ps[0], 3, ps[1], -1).permute(0, 2, 3, 1)[:, :, :, :2]
         predictions_exp -= rot_mat_inv[:, :2, 2].unsqueeze(1).unsqueeze(1)
-        return predictions_exp.permute(0, 2, 1, 3).unsqueeze(1), confidences #, gmm, x, goal_vector
+        return predictions_exp.permute(0, 2, 1, 3).unsqueeze(1), confidences, goals
 
     def create_rot_matrix(self, state_masked):
         cur_3d = torch.ones_like(state_masked[:, 0, :3])
