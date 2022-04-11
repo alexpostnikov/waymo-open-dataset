@@ -130,9 +130,9 @@ def vis_cur_and_fut(decoded_example, predictions=None, size_pixels=1000, bn=0, c
     m = current_states_mask
     prediction = None
     if predictions is not None:
-        prediction = predictions[(data["state/tracks_to_predict"]>0).nonzero()].detach().cpu().numpy()
-        prediction = prediction[:,0] + current_states[:,np.newaxis][data["state/tracks_to_predict"]>0]
-        # predictions = predictions.cumsum(1)
+        prediction = predictions.clone() #[(data["state/tracks_to_predict"]>0).nonzero()].detach().cpu().numpy()
+        # prediction = prediction[:,0] #+ current_states[:,np.newaxis][data["state/tracks_to_predict"]>0]
+        # # predictions = predictions.cumsum(1)
 
     future_states_mask *= np.repeat(data["state/tracks_to_predict"].reshape(128, 1), 80, axis=1)>0
     im = visualize_one_step_with_future(s[:, 0], m[:, 0], future_states, future_states_mask, roadgraph_xyz,
@@ -176,20 +176,9 @@ def visualize_one_step_with_future(states, mask, future_states, future_states_ma
             maskeds_x.append(masked_x)
             maskeds_y.append(masked_y)
         colors = color_map[ped] #+ np.array([0.3,0.3,0.3,0.3])
-        ax.plot(
-            maskeds_x,
-            maskeds_y,
-            # marker='o',
-            linewidth=4,
-            color=colors,
-        )
-        ax.plot(
-            maskeds_x,
-            maskeds_y,
-            # marker='o',
-            linewidth=2,
-            color=np.array([181, 179, 92, 255])/255.,
-        )
+        ax.plot( maskeds_x, maskeds_y, linewidth=4, color=colors)
+        ax.plot( maskeds_x, maskeds_y, linewidth=2, color=np.array([181, 179, 92, 255])/255.)
+
     nump, timestamps, modalities, datadim = predictions.shape
     if predictions is not None:
         for ped in range(nump):

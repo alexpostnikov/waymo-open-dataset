@@ -240,7 +240,7 @@ test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, n
 
 device = "cuda"
 # net = MapLess(config.use_every_nth_prediction, config.exp_data_dim)
-net = AttPredictorPecNet(embed_dim=1024, out_modes=6, out_horiz=80//config.use_every_nth_prediction)
+net = AttPredictorPecNet(embed_dim=1024, num_blocks=8, out_modes=6, out_horiz=80//config.use_every_nth_prediction)
 net = torch.nn.DataParallel(net)
 # MultyModel(config.use_every_nth_prediction)
 # net = SimplModel()
@@ -248,7 +248,7 @@ net = torch.nn.DataParallel(net)
 optimizer = optim.Adam(net.parameters(), lr=wandb.config["learning_rate"])
 scheduler = get_cosine_with_hard_restarts_schedule_with_warmup(
             optimizer=optimizer,
-            num_warmup_steps=2000,
+            num_warmup_steps=200,
             num_training_steps=(22000*128 / config.exp_batch_size) * wandb.config["epochs"],
             num_cycles=wandb.config["epochs"]) 
 net = net.to(device)

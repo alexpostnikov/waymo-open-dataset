@@ -365,7 +365,7 @@ class DecoderTraj2(nn.Module):
         trajectories = predictions[:, -1, :self.out_shape - self.out_modes].reshape(bs, self.out_modes, self.out_horiz,
                                                                                     self.out_dim)
         # trajectories = predictions[:, :-self.out_modes].reshape(bs, self.out_modes, self.out_horiz, self.out_dim)
-        trajectories = trajectories.cumsum(2)
+        # trajectories = trajectories.cumsum(2)
         return trajectories, confidences
 
 
@@ -397,7 +397,7 @@ def create_rot_matrix(state_masked):
 
 
 class AttPredictorPecNet(nn.Module):
-    def __init__(self, inp_dim=32, embed_dim=128, num_blocks=8, in_hor=8, out_modes=1, out_dim=2, out_horiz=12,
+    def __init__(self, inp_dim=32, embed_dim=128, num_blocks=8, out_modes=1, out_dim=2, out_horiz=12,
                  dr_rate=0.0, use_vis=True):
         super().__init__()
         self.pointNet = PointNetfeat(global_feat=True)
@@ -480,14 +480,8 @@ class AttPredictorPecNet(nn.Module):
                           torch.cat([goals, torch.ones_like(goals[:, :, :1])], -1).permute(0, 2, 1)).permute(0, 2, 1)[:,
                 :, :2]
         goals -= rot_mat_inv[:, :2, 2].unsqueeze(1)
-        predictions_exp = torch.bmm(rot_mat_inv,
-                                    torch.cat([predictions, torch.ones_like(predictions[:, :, :, :1])], -1).permute(0,
-                                                                                                                    3,
-                                                                                                                    1,
-                                                                                                                    2).reshape(
-                                        ps[0], 3, -1)).reshape(ps[0], 3, ps[1], -1).permute(0, 2, 3, 1)[:, :, :, :2]
-        predictions_exp -= rot_mat_inv[:, :2, 2].unsqueeze(1).unsqueeze(1)
-        return predictions_exp.permute(0, 2, 1, 3).unsqueeze(1), confidences, goals, goal_vector,  rot_mat_inv
+
+       return predictions.permute(0, 2, 1, 3), confidences, goals, goal_vector,  rot_mat, rot_mat_inv
 
 
 class CovNet(nn.Module):
