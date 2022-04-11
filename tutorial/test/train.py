@@ -45,49 +45,10 @@ def train_multymodal(model, loaders, optimizer, num_ep=10, checkpointer=None, lo
         checkpointer.save(epoch, train_losses.mean().item())
 
 
-def test_epoch(epoch, logger, model, test_loader, max_chanks=100):
-    losses = torch.rand(0)
-    pbar = tqdm(test_loader)
-    model.eval()
-    for chank, data in enumerate(pbar):
-        if chank > max_chanks:
-            break
-        poses, confs = model(data)
-        # poses -> bs, num_peds, times, modes, 2
-        loss_nll = pytorch_neg_multi_log_likelihood_batch(data, poses, confs).mean()
-        uni_ades = []
-        for mode in range(poses.shape[3]):
-            ades = uni_ade_poses(data, poses[:, :, :, mode])
-            # calc uni ade. 1.pred = pred+cur, 2. torch.norm(pred, gt), 3. apply mask
-            uni_ades.append(ades)
-        m_ades = torch.stack(uni_ades, dim=1)
-        m_ades = torch.min(m_ades, dim=1).values
-
-        valid = get_valid_data_mask(data)
-        mask = (data["state/tracks_to_predict"].reshape(-1, 128, 1).repeat(1, 1, 80) > 0) * (valid > 0)
-        m_ade = m_ades[mask > 0].mean()
-
-        with torch.no_grad():
-            losses = torch.cat([losses, torch.tensor([loss_nll.detach().item()])], 0)
-            pbar.set_description("ep %s chank %s" % (epoch, chank))
-            pbar.set_postfix({"loss": losses.mean().item(), "m_ade": m_ade.item()})
-            logger.log({"loss": loss_nll,
-                        "min_ade": m_ade.item()})
-            if len(losses) > 500:
-                losses = losses[100:]
-    return losses
-
-
 def goal_vector_to_gmm(predictions,  rot_mat_inv, out_modes=6):
 
     bs = predictions.shape[0]
     mean_predictions = predictions[:, :2 * out_modes].reshape(bs, out_modes, 2)
-    mean_predictions_exp = torch.cat([mean_predictions, torch.ones_like(mean_predictions[:,:,:1])], dim=-1)
-    mean_predictions = (rot_mat_inv @ mean_predictions_exp.permute(0,2,1)).permute(0,2,1)[:,:,:2]
-    mean_predictions -= rot_mat_inv[:, :2, 2].unsqueeze(1)
-    # cov_predictions = predictions[:, 2 * self.out_modes:2 * self.out_modes + 4 * self.out_modes].reshape(bs,
-    #                                                                                                      self.out_modes,
-    #                                                                                                      2, 2)
     cov_predictions = 3 * torch.eye(2).unsqueeze(0).unsqueeze(0).repeat(bs, out_modes, 1, 1).to(
         mean_predictions.device)
     probs_predictions = predictions[:, -out_modes:]
@@ -110,56 +71,34 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
     pbar = tqdm(train_loader)
     for chank, data in enumerate(pbar):
         optimizer.zero_grad()
-        poses, confs, goals, goal_vector,  rot_mat_inv = model(data)
-
+        poses, confs, goals, goal_vector,  rot_mat, rot_mat_inv = model(data)
         gmm = goal_vector_to_gmm(goal_vector,  rot_mat_inv)
-        bs = poses.shape[0]
         mask = data["state/tracks_to_predict"]
-        fut = get_future(data).to(poses.device)[:, -1][mask > 0] - get_current(data)[:, 0].to(poses.device)[mask > 0]
-        nll = -gmm.log_prob(fut)[data["state/future/valid"].reshape(-1, 128, 80)[mask > 0][:,-1]>0]
-        # poses -> bs, num_peds, times, modes, 2
-        # loss_nll = pytorch_neg_multi_log_likelihood_batch(data, poses, confs, use_every_nth_prediction=use_every_nth_prediction).mean()
+        valid = data["state/future/valid"].reshape(-1, 128, 80)[mask > 0].to(poses.device)[:, use_every_nth_prediction - 1::use_every_nth_prediction]
+        fut_path = get_future(data).to(poses.device).permute(0, 2, 1, 3)[mask > 0]
 
-        uni_ades = []
-        uni_fdes = []
-        for mode in range(poses.shape[3]):
-            ades = uni_ade_poses(data, poses[:, :, :,
-                                       mode],
-                                 use_every_nth_prediction=use_every_nth_prediction)  # calc uni ade. 1.pred = pred+cur, 2. torch.norm(pred, gt), 3. apply mask
-            fdes = uni_fde_poses(data, goals.unsqueeze(1).unsqueeze(1)[:, :, :, mode])
-            uni_ades.append(ades)
-            uni_fdes.append(fdes)
-        m_ades = torch.stack(uni_ades, dim=1)
-        m_ades = torch.min(m_ades, dim=1).values
+        fut_ext = torch.cat([fut_path, torch.ones_like(fut_path[:, :, :1])], -1)
+        fut_path = torch.bmm(rot_mat, fut_ext.permute(0,2,1)).permute(0, 2, 1)[:, use_every_nth_prediction - 1::use_every_nth_prediction, :2]
+        goal_nll = -gmm.log_prob(fut_path[:, -1])[valid[:, -1] > 0]
 
-        m_fdes = torch.stack(uni_fdes, dim=1)
-        m_fdes = torch.min(m_fdes, dim=1).values
+        m_ades = (torch.norm((fut_path.unsqueeze(2) - poses), dim=-1)*valid.unsqueeze(2)).mean(1).min(-1).values.mean()
+        m_fdes = (torch.norm((fut_path[:, -1].unsqueeze(1) - poses[:, -1]), dim=-1) * valid[:, -1].unsqueeze(1)).min(-1).values
+        m_fdes = m_fdes[m_fdes > 0].mean()
 
-        valid = get_valid_data_mask(data, check_cur=1)
-        mask = data["state/tracks_to_predict"].reshape(-1, 128, 1)  # .repeat(1, 1, 80) > 0) * (valid > 0)
-        gt_fut = get_future(data).to(poses.device)
-        gt = rearrange(gt_fut, "bs timestemps num_peds data_dim -> (bs num_peds) timestemps data_dim")[:,
-             ::use_every_nth_prediction]
-        gt = get_future(data).to(poses.device).permute(0, 2, 1, 3)[mask[:, :, 0] > 0]
-        cur = get_current(data).to(poses.device)
-        poses_moved = cur.permute(0, 2, 1, 3)[mask > 0].unsqueeze(1).repeat(1, 6, 1).unsqueeze(1).unsqueeze(1) + poses
-
-        fut_valid = data["state/future/valid"].reshape(-1, 128, 80)[mask[:, :, 0] > 0].unsqueeze(2).to(
-            poses_moved.device)
-
-        loss_nll = -log_likelihood(gt.unsqueeze(2) * fut_valid.unsqueeze(-1),
-                                   poses_moved[:, 0] * fut_valid.unsqueeze(-1),
-                                   confs).mean()
+        fut_path_masked = fut_path.unsqueeze(2) * valid.unsqueeze(2).unsqueeze(2)
+        pred_masked = poses * valid.unsqueeze(2).unsqueeze(2)
+        loss_nll = -log_likelihood(fut_path_masked, pred_masked, confs).mean()
         m_ade = m_ades.mean()
         m_fde = m_fdes.mean()
-        loss = 1.0 * m_ade + 0.01 * loss_nll + 1 * nll.mean() + m_fde
+        loss = 0.01 * m_ade + 1 * loss_nll + 1 * goal_nll.mean() + 0.001 * m_fde
         loss.backward()
 
         optimizer.step()
+        my_lr = [0]
         if scheduler is not None:
             scheduler.step()
             my_lr = scheduler.get_last_lr()
-            logger.log({"LR": my_lr[0]})
+            # logger.log({})
 
         with torch.no_grad():
             losses = torch.cat([losses, torch.tensor([loss_nll.detach().item()])], 0)
@@ -172,20 +111,30 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
             logger.log({"loss": loss_nll,
                         "min_ade": m_ade.item(),
                         "min_fde": m_fde.item(),
-                        "goal_nll": nll.mean().item()})
+                        "goal_nll": goal_nll.mean().item(),
+                        "LR": my_lr[0]})
             if len(losses) > 500:
                 losses = losses[100:]
 
         if (chank % 200) == 0:
+            poses = apply_tr(poses, rot_mat_inv)
             image = vis_cur_and_fut(data, poses, confs=confs)
             images = wandb.Image(image, caption="Top: Output, Bottom: Input")
             wandb.log({"examples": images})
     return losses
 
 
+def apply_tr(poses, tr):
+    poses_exp = torch.cat([poses, torch.ones_like(poses[..., :1])], dim=-1)
+    bs, times, modes, datadim = poses_exp.shape
+    poses_exp = torch.bmm(tr, rearrange(poses_exp, "bs times  modes  datadim -> bs  datadim  (times  modes) "))
+    poses_exp = rearrange(poses_exp, "bs  datadim  (times  modes)  -> bs  times  modes  datadim",
+                          times=times, modes=modes)[..., :2]
+    return poses_exp
+
 def uni_ade_poses(data, predictions, use_every_nth_prediction=1):
     bs, num_ped, future_steps, _ = predictions.shape
-    gt_fut = get_future(data).to(predictions.device)[:, ::use_every_nth_prediction]
+    gt_fut = get_future(data).to(predictions.device)[:, use_every_nth_prediction-1::use_every_nth_prediction]
     mask = data["state/tracks_to_predict"].reshape(-1, 128)  # .repeat(1, 1, 80) > 0)
     gt_fut = gt_fut.permute(0, 2, 1, 3)[mask > 0]
     # assert gt_fut.shape == torch.Size([bs, future_steps, num_ped, 2])
@@ -195,7 +144,8 @@ def uni_ade_poses(data, predictions, use_every_nth_prediction=1):
     # assert cur.shape == torch.Size([bs, 1, num_ped, 2])
     gt_fut = gt_fut - cur
     fut_valid = data["state/future/valid"].reshape(-1, 128, 80)[mask > 0].unsqueeze(2).to(predictions.device)
-    err = (predictions[:, 0] - gt_fut) * fut_valid
+    fut_valid = fut_valid[:, use_every_nth_prediction-1::use_every_nth_prediction]
+    err = (predictions[:, 0] - gt_fut)[fut_valid[:,:,0]>0]
     dist = torch.norm(err, dim=-1)
     return dist
 
@@ -360,26 +310,28 @@ def pytorch_neg_multi_log_likelihood_batch(data, logits, confidences, use_every_
     bs, num_ped = logits.shape[:2]
     # convert to (batch_size, num_modes, future_len, num_coords)
     gt_fut = get_future(data).to(logits.device)
-    gt = rearrange(gt_fut, "bs timestemps num_peds data_dim -> (bs num_peds) timestemps data_dim")[:,
-         ::use_every_nth_prediction]
-    gt = torch.unsqueeze(gt, 1)  # add modes
+    gt = gt_fut.permute(0, 2, 1, 3)[data["state/tracks_to_predict"].reshape(-1, 128, 1)[:, :, 0] > 0]
+    # gt = rearrange(gt_fut, "bs timestemps num_peds data_dim -> (bs num_peds) timestemps data_dim")[:,
+    #      ::use_every_nth_prediction]
+    # gt = torch.unsqueeze(gt, 1)  # add modes
     valid = get_valid_data_mask(data)
     mask = data["state/tracks_to_predict"].reshape(-1, 128, 1).repeat(1, 1, 80) * valid
     avails = mask.permute(0, 2, 1)
     avails = rearrange(avails, "bs timestemps num_peds -> (bs num_peds) timestemps")
-    avails = avails[:, None, :, None].to(logits.device)[:, :, ::use_every_nth_prediction]  # add modes and cords
 
     logits = rearrange(logits, "bs num_peds timestemps modes data_dim -> (bs num_peds) modes timestemps   data_dim")
     cur = get_current(data)
+    cur = cur[:, 0][data["state/tracks_to_predict"].reshape(-1, 128, 1)[:, :, 0] > 0]
+    cur = cur.unsqueeze(1).unsqueeze(1)
     assert cur.shape == torch.Size([bs, 1, num_ped, 2])
     cur = rearrange(cur, "bs time num_peds data -> (bs num_peds) 1 time data").to(
         logits.device)  # [:, :, ::use_every_nth_prediction]
     logits_moved = logits + cur
-    confidences = rearrange(confidences, "bs num_peds modes -> (bs num_peds) modes")
+    # confidences = rearrange(confidences, "bs num_peds modes -> (bs num_peds) modes")
     # error (batch_size, num_modes, future_len)
     # print(gt.shape, logits_moved.shape, avails.shape)
     error = torch.sum(
-        ((gt - logits_moved) * avails) ** 2, dim=-1
+        ((gt.unsqueeze(1) - logits_moved) * valid[data["state/tracks_to_predict"].reshape(-1, 128)>0].unsqueeze(1).unsqueeze(-1).cuda()) ** 2, dim=-1
     )  # reduce coords and use availability
 
     with np.errstate(
