@@ -78,6 +78,7 @@ def test_epoch(epoch, logger, model, test_loader, max_chanks=100):
     return losses
 
 
+
 def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_prediction=1, scheduler=None):
     losses = torch.rand(0)
     mades = torch.rand(0)
@@ -85,8 +86,11 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
     pbar = tqdm(train_loader)
     for chank, data in enumerate(pbar):
         optimizer.zero_grad()
-        poses, confs, goals = model(data)
+        poses, confs, goals, gmm = model(data)
         bs = poses.shape[0]
+        mask = data["state/tracks_to_predict"]
+        fut = get_future(data).to(poses.device)[:, -1][mask > 0] - get_current(data)[:, 0].to(poses.device)[mask > 0]
+        nll = -gmm.log_prob(fut)[data["state/future/valid"].reshape(-1, 128, 80)[mask > 0][:,-1]>0]
         # poses -> bs, num_peds, times, modes, 2
         # loss_nll = pytorch_neg_multi_log_likelihood_batch(data, poses, confs, use_every_nth_prediction=use_every_nth_prediction).mean()
 
@@ -96,7 +100,7 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
             ades = uni_ade_poses(data, poses[:, :, :,
                                        mode],
                                  use_every_nth_prediction=use_every_nth_prediction)  # calc uni ade. 1.pred = pred+cur, 2. torch.norm(pred, gt), 3. apply mask
-            fdes = uni_fde_poses(data, poses[:, :, :, mode])
+            fdes = uni_fde_poses(data, goals.unsqueeze(1).unsqueeze(1)[:, :, :, mode])
             uni_ades.append(ades)
             uni_fdes.append(fdes)
         m_ades = torch.stack(uni_ades, dim=1)
@@ -122,7 +126,7 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
                                    confs).mean()
         m_ade = m_ades.mean()
         m_fde = m_fdes.mean()
-        loss = m_fde + m_ade + 0.01 * loss_nll
+        loss = 1.0 * m_ade + 0.01 * loss_nll + 1 * nll.mean() + m_fde
         loss.backward()
 
         optimizer.step()
@@ -140,14 +144,16 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
                               # "predicted": (mask[:, :, ::use_every_nth_prediction].sum(2)/poses.shape[2]).sum().item()
                               })
             logger.log({"loss": loss_nll,
-                        "min_ade": m_ade.item()})
+                        "min_ade": m_ade.item(),
+                        "min_fde": m_fde.item(),
+                        "goal_nll": nll.mean().item()})
             if len(losses) > 500:
                 losses = losses[100:]
 
-        # if (chank % 200) == 0:
-        #     image = vis_cur_and_fut(data, poses, confs=confs)
-        #     images = wandb.Image(image, caption="Top: Output, Bottom: Input")
-        #     wandb.log({"examples": images})
+        if (chank % 200) == 0:
+            image = vis_cur_and_fut(data, poses, confs=confs)
+            images = wandb.Image(image, caption="Top: Output, Bottom: Input")
+            wandb.log({"examples": images})
     return losses
 
 
@@ -167,6 +173,11 @@ def uni_ade_poses(data, predictions, use_every_nth_prediction=1):
     dist = torch.norm(err, dim=-1)
     return dist
 
+
+def goals_nll(gmm, data):
+    gt_fut = get_future(data).to(gmm.device)[:, -1]
+    mask = data["state/tracks_to_predict"].reshape(-1, 128)  # .repeat(1, 1, 80) > 0)
+    gt_fut = gt_fut[mask > 0]
 
 def uni_fde_poses(data, predictions):
     bs, num_ped, future_steps, _ = predictions.shape
@@ -213,9 +224,9 @@ def get_future_speed(data, num_ped=128, future_steps=80):
 
 def get_valid_data_mask(data, check_fut=1, check_cur=0, check_past=0):
     bs = data["state/future/x"].shape[0]
-    fut_valid = torch.ones([bs,128,80])>0
+    fut_valid = torch.ones([bs, 128, 80]) > 0
     if check_fut:
-        fut_valid *= data["state/future/valid"].reshape(bs, 128, -1)>0
+        fut_valid *= data["state/future/valid"].reshape(bs, 128, -1) > 0
     if check_cur:
         fut_valid *= (data["state/current/valid"].reshape(bs, 128, -1) > 0)
     if check_past:

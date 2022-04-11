@@ -8,6 +8,7 @@ import torch.distributions as D
 # import timm
 from test.pointNet import PointNetfeat
 
+
 def get_n_params(model):
     pp = 0
     for p in list(model.parameters()):
@@ -143,7 +144,6 @@ class PoseAttention(nn.Module):
         return agent_h
 
     def forward(self, x, agent_h):
-
         agent_h_te = time_encoding_sin(agent_h, added_emb_dim=self.pose_emb_dim)
         value = self.v_mlp(agent_h_te).permute(1, 0, 2)
         key = self.k_mlp(agent_h_te).permute(1, 0, 2)
@@ -200,7 +200,6 @@ class VisualAttentionTransformer(nn.Module):
         return agent_h
 
     def forward(self, resnet_out, agent_h, masking=0):
-
         value = self.v_mlp(resnet_out).unsqueeze(1).permute(1, 0, 2)
         key = self.k_mlp(resnet_out).unsqueeze(1).permute(1, 0, 2)
         query = self.q_mlp(agent_h).permute(1, 0, 2)
@@ -255,7 +254,7 @@ class DecoderGoals(nn.Module):
             nn.ReLU(),
             nn.Dropout(dr_rate),
             nn.LayerNorm(512),
-            nn.Linear(512, out_dim * out_modes)
+            nn.Linear(512, out_dim )
         )
 
     def pred_to_gmm(self, predictions):
@@ -264,7 +263,8 @@ class DecoderGoals(nn.Module):
         # cov_predictions = predictions[:, 2 * self.out_modes:2 * self.out_modes + 4 * self.out_modes].reshape(bs,
         #                                                                                                      self.out_modes,
         #                                                                                                      2, 2)
-        cov_predictions = torch.eye(2).unsqueeze(0).unsqueeze(0).repeat(bs, self.out_modes, 1, 1).to(mean_predictions.device)
+        cov_predictions = 3 * torch.eye(2).unsqueeze(0).unsqueeze(0).repeat(bs, self.out_modes, 1, 1).to(
+            mean_predictions.device)
         probs_predictions = predictions[:, -self.out_modes:]
 
         probs_predictions = torch.sigmoid(probs_predictions)
@@ -280,7 +280,7 @@ class DecoderGoals(nn.Module):
 
     def forward(self, hist_enc):
         bs = hist_enc.shape[0]
-        predictions = self.layers(hist_enc[:, -1, :].reshape(bs, -1))
+        predictions = self.layers(hist_enc).reshape(bs, -1)
         gmm = self.pred_to_gmm(predictions)
         return gmm, predictions
 
@@ -320,36 +320,36 @@ class DecoderTraj2(nn.Module):
         self.out_modes, self.out_dim, self.out_horiz = out_modes, out_dim, out_horiz
         self.goal_embeder = nn.Sequential(nn.Linear(2, 8),
                                           nn.ReLU(),
-                                          nn.Linear(8, 32))
+                                          nn.Linear(8, inp_dim//2))
         out_shape = out_dim * out_modes * out_horiz + self.out_modes
         self.out_shape = out_shape
         self.layers = nn.Sequential(
-            nn.Linear(inp_dim + 32 + 16, inp_dim*2),
+            nn.Linear(inp_dim + inp_dim//2 + 16, inp_dim * 2),
             nn.ReLU(),
             nn.Dropout(dr_rate),
-            nn.LayerNorm(inp_dim*2),
-            nn.Linear(inp_dim*2, inp_dim),
+            nn.LayerNorm(inp_dim * 2),
+            nn.Linear(inp_dim * 2, inp_dim),
             nn.ReLU(),
             nn.Dropout(dr_rate),
             nn.LayerNorm(inp_dim),
-            nn.Linear(inp_dim, out_shape*2)
+            nn.Linear(inp_dim, out_shape * 2)
         )
 
         self.outlayers = nn.Sequential(
-            nn.Linear(out_shape*2, out_shape*4),
+            nn.Linear(out_shape * 2, out_shape * 4),
             nn.ReLU(),
 
-            nn.Linear(out_shape*4, out_shape*2),
+            nn.Linear(out_shape * 4, out_shape * 2),
             nn.ReLU(),
             nn.Dropout(dr_rate),
-            nn.LayerNorm(out_shape*2),
-            nn.Linear(out_shape*2, out_shape)
+            nn.LayerNorm(out_shape * 2),
+            nn.Linear(out_shape * 2, out_shape)
         )
-        self.att = nn.MultiheadAttention(out_shape*2, out_modes, dropout=0.)
-        self.q_mlp = nn.Linear(inp_dim + 32 + 16, out_shape*2)
-        self.k_mlp = nn.Linear(inp_dim + 32 + 16, out_shape*2)
-        self.v_mlp = nn.Linear(inp_dim + 32 + 16, out_shape*2)
-        self.lstm = nn.LSTM(out_shape*2, out_shape)
+        self.att = nn.MultiheadAttention(out_shape * 2, out_modes, dropout=0.)
+        self.q_mlp = nn.Linear(inp_dim + inp_dim//2 + 16, out_shape * 2)
+        self.k_mlp = nn.Linear(inp_dim + inp_dim//2 + 16, out_shape * 2)
+        self.v_mlp = nn.Linear(inp_dim + inp_dim//2 + 16, out_shape * 2)
+        self.lstm = nn.LSTM(out_shape * 2, out_shape)
 
     def forward(self, hist_enc, goal):
         bs = hist_enc.shape[0]
@@ -360,10 +360,10 @@ class DecoderTraj2(nn.Module):
         inp_v = self.v_mlp(inp)
         predictions, _ = self.att(inp_k, inp_q, inp_v)
         predictions = self.outlayers(predictions)
-        # predictions_pre = self.layers(inp)
-        # predictions, (_, _) = self.lstm(predictions_pre)
+
         confidences = torch.softmax(predictions[:, -self.out_modes:, -1], dim=-1)
-        trajectories = predictions[:, -1, :self.out_shape - self.out_modes].reshape(bs, self.out_modes, self.out_horiz, self.out_dim)
+        trajectories = predictions[:, -1, :self.out_shape - self.out_modes].reshape(bs, self.out_modes, self.out_horiz,
+                                                                                    self.out_dim)
         # trajectories = predictions[:, :-self.out_modes].reshape(bs, self.out_modes, self.out_horiz, self.out_dim)
         trajectories = trajectories.cumsum(2)
         return trajectories, confidences
@@ -381,9 +381,24 @@ def gmm_means(gmm):
     return gmm.component_distribution.loc
 
 
+def create_rot_matrix(state_masked):
+    cur_3d = torch.ones_like(state_masked[:, 0, :3])
+    cur_3d[:, :2] = -state_masked[:, 0, :2].clone()
+    T = torch.eye(3).unsqueeze(0).repeat(cur_3d.shape[0], 1, 1).to(cur_3d.device)
+    T[:, :, 2] = cur_3d
+    angles = torch.atan2(state_masked[:, 0, 2], state_masked[:, 0, 3])
+    rot_mat = torch.eye(3).unsqueeze(0).repeat(cur_3d.shape[0], 1, 1).to(cur_3d.device)
+    rot_mat[:, 0, 0] = torch.cos(angles)
+    rot_mat[:, 1, 1] = torch.cos(angles)
+    rot_mat[:, 0, 1] = -torch.sin(angles)
+    rot_mat[:, 1, 0] = torch.sin(angles)
+    transform = rot_mat @ T
+    return transform
+
+
 class AttPredictorPecNet(nn.Module):
     def __init__(self, inp_dim=32, embed_dim=128, num_blocks=8, in_hor=8, out_modes=1, out_dim=2, out_horiz=12,
-                 dr_rate=0.3, use_vis=True):
+                 dr_rate=0.0, use_vis=True):
         super().__init__()
         self.pointNet = PointNetfeat(global_feat=True)
         self.latent = nn.Parameter(torch.rand(out_modes, embed_dim + 16))
@@ -392,14 +407,11 @@ class AttPredictorPecNet(nn.Module):
         self.decoder_goals = DecoderGoals(embed_dim, 12, out_modes, dr_rate=dr_rate)
         self.decoder_trajs = DecoderTraj2(embed_dim, 12, out_modes, out_dim, out_horiz, dr_rate)
 
-
-
     def forward(self, data):
-
         ### xyz emb
         bs = data["roadgraph_samples/xyz"].shape[0]
         masks = data["state/tracks_to_predict"].reshape(-1, 128) > 0
-        bsr = masks.sum() # num peds to predict, bs real
+        bsr = masks.sum()  # num peds to predict, bs real
 
         # positional embedder
 
@@ -414,7 +426,7 @@ class AttPredictorPecNet(nn.Module):
         velocities[:, :-1] = poses[:, :-1] - poses[:, 1:]
         state = torch.cat([poses, velocities], dim=-1)
         state_masked = state.reshape(bs, 128, 11, -1)[masks]
-        rot_mat = self.create_rot_matrix(state_masked)
+        rot_mat = create_rot_matrix(state_masked)
         rot_mat_inv = torch.inverse(rot_mat)
         ### rotate velocicites state
         # vel_expanded = torch.cat([state_masked[:, :, 2:], torch.ones_like(state_masked[:, :, :1])], -1)
@@ -423,8 +435,8 @@ class AttPredictorPecNet(nn.Module):
         ### rotate cur state
         state_expanded = torch.cat([state_masked[:, :, :2], torch.ones_like(state_masked[:, :, :1])], -1)
         state_masked[:, :, :2] = torch.bmm(rot_mat, state_expanded.permute(0, 2, 1)).permute(0, 2, 1)[:, :, :2]
-        state_masked[:, :-1, 2:] *= 0
-        state_masked[:, :-1, 2:] *= state_masked[:, :-1, :2] - state_masked[:, 1:, :2]
+        # state_masked[:, :-1, 2:] *= 0
+        state_masked[:, :-1, 2:] = state_masked[:, :-1, :2] - state_masked[:, 1:, :2]
         agent_h_emb = self.embeder(state_masked)
 
         # pointnet embedder
@@ -445,29 +457,37 @@ class AttPredictorPecNet(nn.Module):
         x = self.latent.unsqueeze(0).repeat(bsr, 1, 1)
         x = self.encoder(x, xyz_emb, agent_h_emb)
         gmm, goal_vector = self.decoder_goals(x)
-        #goals = gmm.mean
-        goals = gmm.component_distribution.mean
-        predictions, confidences = self.decoder_trajs(x, goals)
-        ps = predictions.shape
-        predictions_exp = torch.bmm(rot_mat_inv,
-                      torch.cat([predictions, torch.ones_like(predictions[:, :, :, :1])], -1).permute(0, 3, 1, 2).reshape(
-                      ps[0], 3, -1)).reshape(ps[0], 3, ps[1], -1).permute(0, 2, 3, 1)[:, :, :, :2]
-        predictions_exp -= rot_mat_inv[:, :2, 2].unsqueeze(1).unsqueeze(1)
-        return predictions_exp.permute(0, 2, 1, 3).unsqueeze(1), confidences, goals
+        # goals = gmm.mean
+        goals = gmm.component_distribution.mean.clone()
+        # gmm.component_distribution.mean
+        gmm.component_distribution.loc = torch.bmm(rot_mat_inv,
+                          torch.cat([gmm.component_distribution.loc, torch.ones_like(gmm.component_distribution.mean[:, :, :1])], -1).permute(0, 2, 1)).permute(0, 2, 1)[:,
+                :, :2]
+        gmm.component_distribution.loc -= rot_mat_inv[:, :2, 2].unsqueeze(1)
 
-    def create_rot_matrix(self, state_masked):
-        cur_3d = torch.ones_like(state_masked[:, 0, :3])
-        cur_3d[:, :2] = -state_masked[:, 0, :2].clone()
-        T = torch.eye(3).unsqueeze(0).repeat(cur_3d.shape[0], 1, 1).to(cur_3d.device)
-        T[:,:,2] = cur_3d
-        angles = torch.atan2(state_masked[:, 0, 2], state_masked[:, 0   , 3])
-        rot_mat = torch.eye(3).unsqueeze(0).repeat(cur_3d.shape[0], 1, 1).to(cur_3d.device)
-        rot_mat[:, 0, 0] = torch.cos(angles)
-        rot_mat[:, 1, 1] = torch.cos(angles)
-        rot_mat[:, 0, 1] = -torch.sin(angles)
-        rot_mat[:, 1, 0] = torch.sin(angles)
-        transform = rot_mat @ T
-        return transform
+        gt_goals = torch.cat([data["state/future/x"].reshape(-1,128,80,1), data["state/future/y"].reshape(-1,128,80,1)], -1)[data["state/tracks_to_predict"]>0][:,-1:].repeat(1,6,1)
+        gt_goals = torch.cat([gt_goals, torch.ones_like(gt_goals[:,:,:1])], -1).to(goals.device)
+        gt_goals = torch.bmm(rot_mat , gt_goals.permute(0,2,1)).permute(0,2,1)[:,:,:2]
+
+        ## find where no final goal at timestamp 80
+        no_gt_future_indexes = data["state/future/valid"].reshape(-1,128,80)[data["state/tracks_to_predict"] > 0][:,-1] == 0
+        gt_goals[no_gt_future_indexes] = gmm.component_distribution.loc[no_gt_future_indexes]
+
+        predictions, confidences = self.decoder_trajs(x, gt_goals)
+        ps = predictions.shape
+        ## rotate goals back
+        goals = torch.bmm(rot_mat_inv,
+                          torch.cat([goals, torch.ones_like(goals[:, :, :1])], -1).permute(0, 2, 1)).permute(0, 2, 1)[:,
+                :, :2]
+        goals -= rot_mat_inv[:, :2, 2].unsqueeze(1)
+        predictions_exp = torch.bmm(rot_mat_inv,
+                                    torch.cat([predictions, torch.ones_like(predictions[:, :, :, :1])], -1).permute(0,
+                                                                                                                    3,
+                                                                                                                    1,
+                                                                                                                    2).reshape(
+                                        ps[0], 3, -1)).reshape(ps[0], 3, ps[1], -1).permute(0, 2, 3, 1)[:, :, :, :2]
+        predictions_exp -= rot_mat_inv[:, :2, 2].unsqueeze(1).unsqueeze(1)
+        return predictions_exp.permute(0, 2, 1, 3).unsqueeze(1), confidences, goals, gmm
 
 
 class CovNet(nn.Module):
@@ -545,7 +565,6 @@ class AttPredictorPecNetCovNet(nn.Module):
         return trajectories, confidences, gmm, traj_gmm, None
 
 
-
 if __name__ == "__main__":
     model = AttPredictorPecNet(embed_dim=1024, out_modes=6, out_horiz=20).cuda()
     bs = 2
@@ -560,6 +579,6 @@ if __name__ == "__main__":
             "state/past/x": torch.rand(bs, 128, 10).cuda(),
             "state/past/y": torch.rand(bs, 128, 10).cuda(),
             "state/tracks_to_predict": to_predict
-    }
+            }
     out = model(data)
     print(1)

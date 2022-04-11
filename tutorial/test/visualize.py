@@ -130,14 +130,14 @@ def vis_cur_and_fut(decoded_example, predictions=None, size_pixels=1000, bn=0, c
     m = current_states_mask
     prediction = None
     if predictions is not None:
-        prediction = predictions[bn].detach().cpu().numpy()
-        prediction = prediction + current_states[:,np.newaxis]
+        prediction = predictions[(data["state/tracks_to_predict"]>0).nonzero()].detach().cpu().numpy()
+        prediction = prediction[:,0] + current_states[:,np.newaxis][data["state/tracks_to_predict"]>0]
         # predictions = predictions.cumsum(1)
 
     future_states_mask *= np.repeat(data["state/tracks_to_predict"].reshape(128, 1), 80, axis=1)>0
     im = visualize_one_step_with_future(s[:, 0], m[:, 0], future_states, future_states_mask, roadgraph_xyz,
                             'cur with fut', center_y, center_x, width, color_map, size_pixels,
-                                        predictions=prediction, confs=confs[bn])
+                                        predictions=prediction, confs=confs[(data["state/tracks_to_predict"]>0).nonzero()])
     return im
 
 
@@ -192,7 +192,7 @@ def visualize_one_step_with_future(states, mask, future_states, future_states_ma
         )
     nump, timestamps, modalities, datadim = predictions.shape
     if predictions is not None:
-        for ped in range(128):
+        for ped in range(nump):
             if future_states_mask[ped].sum() == 0:
                 continue
             for modality in range(modalities):
@@ -220,7 +220,7 @@ def visualize_one_step_with_future(states, mask, future_states, future_states_ma
                     maskeds_x,
                     maskeds_y,
                     # marker='o',
-                    linewidth=3*conf,
+                    linewidth=5*conf,
                     color=colors - np.array([0, 0, 0, 1-conf]),
                 )
                 ax.text(maskeds_x[-1], maskeds_y[-1], f"{conf:.2f}",
