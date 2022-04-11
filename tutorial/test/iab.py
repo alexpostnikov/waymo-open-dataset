@@ -350,6 +350,7 @@ class DecoderTraj2(nn.Module):
         self.k_mlp = nn.Linear(inp_dim + inp_dim//2 + 16, out_shape * 2)
         self.v_mlp = nn.Linear(inp_dim + inp_dim//2 + 16, out_shape * 2)
         self.lstm = nn.LSTM(out_shape * 2, out_shape)
+        self.conf_mlp = nn.Sequential(nn.Linear(self.out_modes,self.out_modes), nn.ReLU(), nn.Linear(self.out_modes,self.out_modes))
 
     def forward(self, hist_enc, goal):
         bs = hist_enc.shape[0]
@@ -361,7 +362,7 @@ class DecoderTraj2(nn.Module):
         predictions, _ = self.att(inp_k, inp_q, inp_v)
         predictions = self.outlayers(predictions)
 
-        confidences = torch.softmax(predictions[:, -self.out_modes:, -1], dim=-1)
+        confidences = torch.softmax(self.conf_mlp(predictions[:, -self.out_modes:, -1]), dim=-1)
         trajectories = predictions[:, -1, :self.out_shape - self.out_modes].reshape(bs, self.out_modes, self.out_horiz,
                                                                                     self.out_dim)
         # trajectories = predictions[:, :-self.out_modes].reshape(bs, self.out_modes, self.out_horiz, self.out_dim)
@@ -447,7 +448,7 @@ class AttPredictorPecNet(nn.Module):
         # ...
         for i, index in enumerate(masks.nonzero()):
             xyz_p = torch.ones([xyz.shape[1], xyz.shape[2]], device=xyz.device)
-            xyz_p[:, :2] = xyz[index[0], :, :2] - cur[index[0], index[1], 0]
+            xyz_p[:, :2] = xyz[index[0], :, :2].clone()
             xyz_p = (rot_mat[i] @ xyz_p.T).T
             xyz_personal = torch.cat((xyz_personal, xyz_p.unsqueeze(0)), dim=0)
         xyz_emb, _, _ = self.pointNet(xyz_personal.permute(0, 2, 1))
