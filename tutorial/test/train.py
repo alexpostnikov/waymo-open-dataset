@@ -78,6 +78,30 @@ def test_epoch(epoch, logger, model, test_loader, max_chanks=100):
     return losses
 
 
+def goal_vector_to_gmm(predictions,  rot_mat_inv, out_modes=6):
+
+    bs = predictions.shape[0]
+    mean_predictions = predictions[:, :2 * out_modes].reshape(bs, out_modes, 2)
+    mean_predictions_exp = torch.cat([mean_predictions, torch.ones_like(mean_predictions[:,:,:1])], dim=-1)
+    mean_predictions = (rot_mat_inv @ mean_predictions_exp.permute(0,2,1)).permute(0,2,1)[:,:,:2]
+    mean_predictions -= rot_mat_inv[:, :2, 2].unsqueeze(1)
+    # cov_predictions = predictions[:, 2 * self.out_modes:2 * self.out_modes + 4 * self.out_modes].reshape(bs,
+    #                                                                                                      self.out_modes,
+    #                                                                                                      2, 2)
+    cov_predictions = 3 * torch.eye(2).unsqueeze(0).unsqueeze(0).repeat(bs, out_modes, 1, 1).to(
+        mean_predictions.device)
+    probs_predictions = predictions[:, -out_modes:]
+
+    probs_predictions = torch.sigmoid(probs_predictions)
+    mix = torch.distributions.Categorical(probs_predictions)
+
+    scale_tril = torch.tril(((cov_predictions ** 2) + 1e-6))
+    scale_tril[:, :, 1, 0] = cov_predictions[:, :, 1, 0]
+
+    distr = torch.distributions.multivariate_normal.MultivariateNormal(mean_predictions, scale_tril=scale_tril)
+
+    gmm = torch.distributions.MixtureSameFamily(mix, distr)
+    return gmm
 
 def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_prediction=1, scheduler=None):
     losses = torch.rand(0)
@@ -86,7 +110,9 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
     pbar = tqdm(train_loader)
     for chank, data in enumerate(pbar):
         optimizer.zero_grad()
-        poses, confs, goals, gmm = model(data)
+        poses, confs, goals, goal_vector,  rot_mat_inv = model(data)
+
+        gmm = goal_vector_to_gmm(goal_vector,  rot_mat_inv)
         bs = poses.shape[0]
         mask = data["state/tracks_to_predict"]
         fut = get_future(data).to(poses.device)[:, -1][mask > 0] - get_current(data)[:, 0].to(poses.device)[mask > 0]

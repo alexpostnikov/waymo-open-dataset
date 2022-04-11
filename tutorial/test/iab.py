@@ -487,7 +487,7 @@ class AttPredictorPecNet(nn.Module):
                                                                                                                     2).reshape(
                                         ps[0], 3, -1)).reshape(ps[0], 3, ps[1], -1).permute(0, 2, 3, 1)[:, :, :, :2]
         predictions_exp -= rot_mat_inv[:, :2, 2].unsqueeze(1).unsqueeze(1)
-        return predictions_exp.permute(0, 2, 1, 3).unsqueeze(1), confidences, goals, gmm
+        return predictions_exp.permute(0, 2, 1, 3).unsqueeze(1), confidences, goals, goal_vector,  rot_mat_inv
 
 
 class CovNet(nn.Module):
