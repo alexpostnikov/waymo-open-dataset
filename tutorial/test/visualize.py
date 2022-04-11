@@ -179,18 +179,19 @@ def visualize_one_step_with_future(states, mask, future_states, future_states_ma
         ax.plot( maskeds_x, maskeds_y, linewidth=4, color=colors)
         ax.plot( maskeds_x, maskeds_y, linewidth=2, color=np.array([181, 179, 92, 255])/255.)
 
-    nump, timestamps, modalities, datadim = predictions.shape
+    _, timestamps, modalities, datadim = predictions.shape
+    nump = confs.shape[0]
     if predictions is not None:
         for ped in range(nump):
-            if future_states_mask[ped].sum() == 0:
-                continue
+            # if future_states_mask[ped].sum() == 0:
+            #     continue
             for modality in range(modalities):
                 maskeds_x = []
                 maskeds_y = []
                 for step in range(timestamps):
-                    if not future_states_mask[ped, step]:
-                        continue
-                    if [future_states_mask[ped, step]]:
+                    # if not future_states_mask[ped, step]:
+                    #     continue
+                    # if [future_states_mask[ped, step]]:
                         masked_x = predictions[ped, step, modality, 0]
                         masked_y = predictions[ped, step, modality, 1]
                         maskeds_x.append(masked_x)
