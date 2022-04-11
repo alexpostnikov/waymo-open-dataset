@@ -234,7 +234,7 @@ test_path = os.path.join(config.dir_data, "testing/testing_tfexample.tfrecord-*-
 # "/media/robot/hdd/waymo_dataset/tf_example/training/"
 train_dataset = CustomImageDataset(train_tfrecord_path, context_description)
 test_dataset = CustomImageDataset(test_path, context_description)
-train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, num_workers=12)
+train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, num_workers=0)
 test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, num_workers=0)
 
 
@@ -248,7 +248,7 @@ net = torch.nn.DataParallel(net)
 optimizer = optim.Adam(net.parameters(), lr=wandb.config["learning_rate"])
 scheduler = get_cosine_with_hard_restarts_schedule_with_warmup(
             optimizer=optimizer,
-            num_warmup_steps=200,
+            num_warmup_steps=2000,
             num_training_steps=(22000*128 / config.exp_batch_size) * wandb.config["epochs"],
             num_cycles=wandb.config["epochs"]) 
 net = net.to(device)
