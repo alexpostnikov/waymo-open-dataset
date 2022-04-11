@@ -20,17 +20,18 @@ def get_n_params(model):
 
 
 class InitEmbedding(nn.Module):
-    def __init__(self, inp_dim=2, out_dim=64, dr_rate=0.3):
+    def __init__(self, inp_dim=2, out_dim=64, dr_rate=0.1):
         super().__init__()
         self.layers = nn.Sequential(
-            nn.Linear(inp_dim, 8),
+            nn.Linear(inp_dim, 32),
             nn.ReLU(),
-            nn.LayerNorm(8),
-            nn.Linear(8, 32),
+            # nn.LayerNorm(8),
+            nn.Linear(32, 128),
             nn.ReLU(),
             nn.Dropout(dr_rate),
-            nn.LayerNorm(32),
-            nn.Linear(32, out_dim)
+            # nn.BatchNorm2d(11),
+            # nn.LayerNorm(32),
+            nn.Linear(128, out_dim)
         )
         self.silly_masking = False
 
@@ -133,8 +134,8 @@ class PoseAttention(nn.Module):
         self.pose_emb_dim = 16
         self.att = nn.MultiheadAttention(embed_dim + self.pose_emb_dim, num_heads, dropout=dr_rate)
         self.q_mlp = nn.Linear(embed_dim + self.pose_emb_dim, embed_dim + self.pose_emb_dim)
-        self.k_mlp = nn.Linear(embed_dim + self.pose_emb_dim, embed_dim + self.pose_emb_dim)
-        self.v_mlp = nn.Linear(embed_dim + self.pose_emb_dim, embed_dim + self.pose_emb_dim)
+        self.k_mlp = nn.Linear(embed_dim + 128, embed_dim + self.pose_emb_dim)
+        self.v_mlp = nn.Linear(embed_dim + 128, embed_dim + self.pose_emb_dim)
         self.silly_masking = True
         self.layer_norm = nn.LayerNorm(embed_dim + self.pose_emb_dim)
 
@@ -144,7 +145,7 @@ class PoseAttention(nn.Module):
         return agent_h
 
     def forward(self, x, agent_h):
-        agent_h_te = time_encoding_sin(agent_h, added_emb_dim=self.pose_emb_dim)
+        agent_h_te = time_encoding_sin(agent_h, added_emb_dim=128)
         value = self.v_mlp(agent_h_te).permute(1, 0, 2)
         key = self.k_mlp(agent_h_te).permute(1, 0, 2)
 
@@ -160,9 +161,11 @@ class SelfAttention(nn.Module):
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.att = nn.MultiheadAttention(embed_dim + 16, num_heads, dropout=dr_rate)
-        self.q_mlp = nn.Linear(embed_dim + 16, embed_dim + 16)
-        self.k_mlp = nn.Linear(embed_dim + 16, embed_dim + 16)
-        self.v_mlp = nn.Linear(embed_dim + 16, embed_dim + 16)
+        self.encoder_layer = nn.TransformerEncoderLayer(d_model=embed_dim + 16, nhead=8)
+        self.transformer_encoder = nn.TransformerEncoder(self.encoder_layer, num_layers=2)
+        self.q_mlp = nn.Linear(embed_dim + 16 + 128, embed_dim + 16)
+        # self.k_mlp = nn.Linear(embed_dim + 16 + 128, embed_dim + 16)
+        # self.v_mlp = nn.Linear(embed_dim + 16 + 128, embed_dim + 16)
         self.silly_masking = True
         self.layer_norm = nn.LayerNorm(embed_dim + 16)
 
@@ -174,11 +177,13 @@ class SelfAttention(nn.Module):
     def forward(self, agent_h, agent_h_avail, masking=0):
         if masking:
             agent_h = self.masking(agent_h, agent_h_avail)
-        value = self.v_mlp(agent_h).permute(1, 0, 2)
-        key = self.k_mlp(agent_h).permute(1, 0, 2)
-        query = self.q_mlp(agent_h).permute(1, 0, 2)
-        out, _ = self.att(query, key, value)
-        out = self.layer_norm(out)
+        agent_h_te = time_encoding_sin(agent_h, added_emb_dim=128)
+        src = self.q_mlp(agent_h_te).permute(1, 0, 2)
+        out = self.transformer_encoder(src)
+        # key = self.k_mlp(agent_h_te).permute(1, 0, 2)
+        # query = self.q_mlp(agent_h_te).permute(1, 0, 2)
+        # out, _ = self.att(query, key, value)
+        # out = self.layer_norm(out)
         return out.permute(1, 0, 2)
 
 
@@ -323,20 +328,20 @@ class DecoderTraj2(nn.Module):
                                           nn.Linear(8, inp_dim//2))
         out_shape = out_dim * out_modes * out_horiz + self.out_modes
         self.out_shape = out_shape
-        self.layers = nn.Sequential(
-            nn.Linear(inp_dim + inp_dim//2 + 16, inp_dim * 2),
-            nn.ReLU(),
-            nn.Dropout(dr_rate),
-            nn.LayerNorm(inp_dim * 2),
-            nn.Linear(inp_dim * 2, inp_dim),
-            nn.ReLU(),
-            nn.Dropout(dr_rate),
-            nn.LayerNorm(inp_dim),
-            nn.Linear(inp_dim, out_shape * 2)
-        )
+        # self.layers = nn.Sequential(
+        #     nn.Linear(inp_dim + inp_dim//2 + 16, inp_dim * 2),
+        #     nn.ReLU(),
+        #     nn.Dropout(dr_rate),
+        #     nn.LayerNorm(inp_dim * 2),
+        #     nn.Linear(inp_dim * 2, inp_dim),
+        #     nn.ReLU(),
+        #     nn.Dropout(dr_rate),
+        #     nn.LayerNorm(inp_dim),
+        #     nn.Linear(inp_dim, out_shape * 2)
+        # )
 
         self.outlayers = nn.Sequential(
-            nn.Linear(out_shape * 2, out_shape * 4),
+            nn.Linear(out_shape * 2 + 128, out_shape * 4),
             nn.ReLU(),
 
             nn.Linear(out_shape * 4, out_shape * 2),
@@ -345,21 +350,25 @@ class DecoderTraj2(nn.Module):
             nn.LayerNorm(out_shape * 2),
             nn.Linear(out_shape * 2, out_shape)
         )
-        self.att = nn.MultiheadAttention(out_shape * 2, out_modes, dropout=0.)
+        # self.att = nn.MultiheadAttention(out_shape * 2, out_modes, dropout=0.)
+
+        self.encoder_layer = nn.TransformerEncoderLayer(d_model=out_shape * 2 + 128, nhead=4)
+        self.transformer_encoder = nn.TransformerEncoder(self.encoder_layer, num_layers=2)
+
         self.q_mlp = nn.Linear(inp_dim + inp_dim//2 + 16, out_shape * 2)
-        self.k_mlp = nn.Linear(inp_dim + inp_dim//2 + 16, out_shape * 2)
-        self.v_mlp = nn.Linear(inp_dim + inp_dim//2 + 16, out_shape * 2)
-        self.lstm = nn.LSTM(out_shape * 2, out_shape)
-        self.conf_mlp = nn.Sequential(nn.Linear(self.out_modes,self.out_modes), nn.ReLU(), nn.Linear(self.out_modes,self.out_modes))
+        self.conf_mlp = nn.Sequential(nn.Linear(self.out_modes, self.out_modes), nn.ReLU(), nn.Linear(self.out_modes, self.out_modes))
 
     def forward(self, hist_enc, goal):
         bs = hist_enc.shape[0]
         goal_embedded = self.goal_embeder(goal)
         inp = torch.cat((hist_enc, goal_embedded), dim=2)
-        inp_k = self.k_mlp(inp)
         inp_q = self.q_mlp(inp)
-        inp_v = self.v_mlp(inp)
-        predictions, _ = self.att(inp_k, inp_q, inp_v)
+
+        agent_h_te = time_encoding_sin(inp_q, added_emb_dim=128)
+        # src = self.q_mlp(agent_h_te).permute(1, 0, 2)
+        predictions = self.transformer_encoder(agent_h_te.permute(1, 0, 2)).permute(1, 0, 2)
+
+
         predictions = self.outlayers(predictions)
 
         confidences = torch.softmax(self.conf_mlp(predictions[:, -self.out_modes:, -1]), dim=-1)
@@ -402,7 +411,7 @@ class AttPredictorPecNet(nn.Module):
                  dr_rate=0.0, use_vis=True):
         super().__init__()
         self.pointNet = PointNetfeat(global_feat=True)
-        self.latent = nn.Parameter(torch.rand(out_modes, embed_dim + 16))
+        self.latent = nn.Parameter(torch.rand(out_modes, embed_dim + 16), requires_grad=True)
         self.embeder = InitEmbedding(inp_dim=4, out_dim=embed_dim)
         self.encoder = Encoder(inp_dim, embed_dim, num_blocks, use_vis=use_vis, dr_rate=dr_rate)
         self.decoder_goals = DecoderGoals(embed_dim, 12, out_modes, dr_rate=dr_rate)
@@ -429,19 +438,13 @@ class AttPredictorPecNet(nn.Module):
         state_masked = state.reshape(bs, 128, 11, -1)[masks]
         rot_mat = create_rot_matrix(state_masked)
         rot_mat_inv = torch.inverse(rot_mat)
-        ### rotate velocicites state
-        # vel_expanded = torch.cat([state_masked[:, :, 2:], torch.ones_like(state_masked[:, :, :1])], -1)
-        # state_masked[:, :, 2:] = torch.bmm(rot_mat_inv, vel_expanded.permute(0, 2, 1)).permute(0, 2, 1)[:,:,:2]
-        # state_masked[:, : , 2:] = rot_mat @ state_masked[:, : 2, :]
         ### rotate cur state
         state_expanded = torch.cat([state_masked[:, :, :2], torch.ones_like(state_masked[:, :, :1])], -1)
         state_masked[:, :, :2] = torch.bmm(rot_mat, state_expanded.permute(0, 2, 1)).permute(0, 2, 1)[:, :, :2]
         # state_masked[:, :-1, 2:] *= 0
         state_masked[:, :-1, 2:] = state_masked[:, :-1, :2] - state_masked[:, 1:, :2]
         agent_h_emb = self.embeder(state_masked)
-
         # pointnet embedder
-
         xyz = data["roadgraph_samples/xyz"].reshape(bs, -1, 3)[:, ::200].cuda()
         xyz_personal = torch.zeros([0, xyz.shape[1], xyz.shape[2]], device=xyz.device)
         ## rotate pointclouds
@@ -466,9 +469,9 @@ class AttPredictorPecNet(nn.Module):
                 :, :2]
         gmm.component_distribution.loc -= rot_mat_inv[:, :2, 2].unsqueeze(1)
 
-        gt_goals = torch.cat([data["state/future/x"].reshape(-1,128,80,1), data["state/future/y"].reshape(-1,128,80,1)], -1)[data["state/tracks_to_predict"]>0][:,-1:].repeat(1,6,1)
-        gt_goals = torch.cat([gt_goals, torch.ones_like(gt_goals[:,:,:1])], -1).to(goals.device)
-        gt_goals = torch.bmm(rot_mat , gt_goals.permute(0,2,1)).permute(0,2,1)[:,:,:2]
+        gt_goals = torch.cat([data["state/future/x"].reshape(-1, 128, 80, 1), data["state/future/y"].reshape(-1, 128, 80, 1)], -1)[data["state/tracks_to_predict"]>0][:, -1:].repeat(1, 6, 1)
+        gt_goals = torch.cat([gt_goals, torch.ones_like(gt_goals[:, :, :1])], -1).to(goals.device)
+        gt_goals = torch.bmm(rot_mat, gt_goals.permute(0, 2, 1)).permute(0, 2, 1)[:, :, :2]
 
         ## find where no final goal at timestamp 80
         no_gt_future_indexes = data["state/future/valid"].reshape(-1,128,80)[data["state/tracks_to_predict"] > 0][:,-1] == 0

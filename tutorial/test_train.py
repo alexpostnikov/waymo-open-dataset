@@ -248,7 +248,7 @@ net = torch.nn.DataParallel(net)
 optimizer = optim.Adam(net.parameters(), lr=wandb.config["learning_rate"])
 scheduler = get_cosine_with_hard_restarts_schedule_with_warmup(
             optimizer=optimizer,
-            num_warmup_steps=2000,
+            num_warmup_steps=20,
             num_training_steps=(22000*128 / config.exp_batch_size) * wandb.config["epochs"],
             num_cycles=wandb.config["epochs"]) 
 net = net.to(device)

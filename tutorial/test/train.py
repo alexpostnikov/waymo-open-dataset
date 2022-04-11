@@ -40,6 +40,7 @@ def train_multymodal(model, loaders, optimizer, num_ep=10, checkpointer=None, lo
 
     train_loader, test_loader = loaders
     for epoch in range(num_ep):  # loop over the dataset multiple times
+        model.train()
         train_losses = train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_prediction, scheduler)
         # test_losses = test_epoch(epoch, logger, model, test_loader)
         checkpointer.save(epoch, train_losses.mean().item())
