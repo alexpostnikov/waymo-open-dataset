@@ -48,7 +48,7 @@ def create_subm(model,  loader):
                     {"aid": aid, "conf": conf, "pred": p}
                 )
 
-        selector = np.arange(14, 80 + 1, 5)
+        selector = np.arange(4, 80 + 1, 5)
         for scenario_id, data in tqdm(RES.items()):
             scenario_predictions = motion_challenge_submission.scenario_predictions.add()
             scenario_predictions.scenario_id = scenario_id
