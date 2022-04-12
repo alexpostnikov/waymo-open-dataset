@@ -31,7 +31,7 @@ def create_subm(model,  loader):
             mask = data["state/tracks_to_predict"].reshape(-1,128)>0
             agent_id = data["state/id"].cpu()[mask].numpy()
             scenario_id = data["scenario/id"]  #?
-            scenario_id = [sc.numpy().tobytes().decode("utf-8") for sc in scenario_id]
+            # scenario_id = [sc.numpy().tobytes().decode("utf-8") for sc in scenario_id]
             scenarios_id = []
             for bn, scenario in enumerate(scenario_id):
                 [scenarios_id.append(scenario) for i in range((mask.nonzero()[:,0] == bn).sum())]
