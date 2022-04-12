@@ -9,7 +9,12 @@ from waymo_open_dataset.protos import motion_submission_pb2
 
 # from test_train import get_ade_from_pred_speed_with_mask, get_speed_ade_with_mask
 def create_subm(model,  loader):
-    model.load_state_dict(torch.load("/home/jovyan/waymo-open-dataset/model-seed-0-epoch-0.pt", map_location="cuda"))
+    try:
+        model.load_state_dict(torch.load("/home/jovyan/waymo-open-dataset/model-seed-0-epoch-0.pt", map_location="cuda"))
+    except:
+        print("fake subm!!!")
+        print("fake subm!!!")
+        print("fake subm!!!")
     # print(model)
     motion_challenge_submission = motion_submission_pb2.MotionChallengeSubmission()
     motion_challenge_submission.account_name = "AlexPostnik"
@@ -30,8 +35,11 @@ def create_subm(model,  loader):
             confidences = confidences.cpu().numpy()
             mask = data["state/tracks_to_predict"].reshape(-1,128)>0
             agent_id = data["state/id"].cpu()[mask].numpy()
-            scenario_id = data["scenario/id"]  #?
-            # scenario_id = [sc.numpy().tobytes().decode("utf-8") for sc in scenario_id]
+            scenario_id = data["scenario/id"]
+            try:
+                scenario_id = [sc.numpy().tobytes().decode("utf-8") for sc in scenario_id]
+            except:
+                pass
             scenarios_id = []
             for bn, scenario in enumerate(scenario_id):
                 [scenarios_id.append(scenario) for i in range((mask.nonzero()[:,0] == bn).sum())]
