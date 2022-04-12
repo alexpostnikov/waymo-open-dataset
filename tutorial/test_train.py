@@ -248,8 +248,8 @@ test_path = os.path.join(config.dir_data, "testing/testing_tfexample.tfrecord-*-
 # "/media/robot/hdd/waymo_dataset/tf_example/training/"
 train_dataset = CustomImageDataset(train_tfrecord_path, context_description)
 test_dataset = CustomImageDataset(test_path, context_description)
-train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, num_workers=0)
-test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, num_workers=0)
+train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, num_workers=3)
+test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, num_workers=6)
 
 
 device = "cuda"
@@ -304,8 +304,8 @@ def overfit_test(model, loader, optimizer):
     plt.imshow(im)
 
 create_subm(net, test_loader)
-train_multymodal(net, (train_loader, test_loader), optimizer, checkpointer=checkpointer, num_ep=wandb.config["epochs"],
-                 logger=wandb, use_every_nth_prediction=config.use_every_nth_prediction, scheduler=scheduler)
+# train_multymodal(net, (train_loader, test_loader), optimizer, checkpointer=checkpointer, num_ep=wandb.config["epochs"],
+#                  logger=wandb, use_every_nth_prediction=config.use_every_nth_prediction, scheduler=scheduler)
 
 print("done")
 print("done")
