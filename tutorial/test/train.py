@@ -22,7 +22,7 @@ def create_subm(model,  loader):
     model.eval()
     RES = {}
     with torch.no_grad():
-        pbar = tqdm(loader, total=int(22000*128//479*150))
+        pbar = tqdm(loader, total=int(22000*128//479*150//loader.batch_size))
         for chank, data in enumerate(pbar):
             logits, confidences, goals, goal_vector, rot_mat, rot_mat_inv = model(data)
 

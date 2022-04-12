@@ -445,7 +445,7 @@ class AttPredictorPecNet(nn.Module):
         state_masked[:, :-1, 2:] = state_masked[:, :-1, :2] - state_masked[:, 1:, :2]
         agent_h_emb = self.embeder(state_masked)
         # pointnet embedder
-        xyz = data["roadgraph_samples/xyz"].reshape(bs, -1, 3)[:, ::200].cuda()
+        xyz = data["roadgraph_samples/xyz"].reshape(bs, -1, 3)[:, ::2].cuda()
         xyz_personal = torch.zeros([0, xyz.shape[1], xyz.shape[2]], device=xyz.device)
         ## rotate pointclouds
         # ...
