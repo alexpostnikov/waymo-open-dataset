@@ -117,11 +117,11 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
             if len(losses) > 500:
                 losses = losses[100:]
 
-        if (chank % 200) == 0:
-            poses = apply_tr(poses, rot_mat_inv)
-            image = vis_cur_and_fut(data, poses, confs=confs)
-            images = wandb.Image(image, caption="Top: Output, Bottom: Input")
-            wandb.log({"examples": images})
+            if (chank % 200) == 0:
+                poses = apply_tr(poses, rot_mat_inv)
+                image = vis_cur_and_fut(data, poses.cpu(), confs=confs.cpu())
+                images = wandb.Image(image, caption="Top: Output, Bottom: Input")
+                wandb.log({"examples": images})
     return losses
 
 

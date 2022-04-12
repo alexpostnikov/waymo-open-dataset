@@ -9,6 +9,7 @@ import torch.distributions as D
 from test.pointNet import PointNetfeat
 import timm
 
+
 def get_n_params(model):
     pp = 0
     for p in list(model.parameters()):
@@ -116,13 +117,6 @@ class NeighbourAttentionTimeEncoding(nn.Module):
         query = self.q_mlp(x).permute(1, 0, 2)
         out, _ = (self.att(query, key, value))
         out = self.layer_norm(out.permute(1, 0, 2))
-        # out shape bs, history_horizon, embed_dim
-
-        # value = self.v_mlp_fin(out)  # .permute(1, 0, 2)
-        # key = self.k_mlp_fin(out)  # .permute(1, 0, 2)
-        # query = self.q_mlp_fin(agent_h).permute(1, 0, 2)
-        # out, _ = (self.att_fin(query, key, value))
-        # out = self.layer_norm(out)
         return out
 
 
@@ -180,10 +174,7 @@ class SelfAttention(nn.Module):
         agent_h_te = time_encoding_sin(agent_h, added_emb_dim=128)
         src = self.q_mlp(agent_h_te).permute(1, 0, 2)
         out = self.transformer_encoder(src)
-        # key = self.k_mlp(agent_h_te).permute(1, 0, 2)
-        # query = self.q_mlp(agent_h_te).permute(1, 0, 2)
-        # out, _ = self.att(query, key, value)
-        # out = self.layer_norm(out)
+
         return out.permute(1, 0, 2)
 
 
@@ -413,8 +404,9 @@ class AttPredictorPecNet(nn.Module):
                  dr_rate=0.0, use_vis=True):
         super().__init__()
         self.pointNet = PointNetfeat(global_feat=True)
-        self.visual = timm.create_model('xcit_small_12_p8_224_dist', pretrained=True)
-        self.visual.head = nn.Linear(self.visual.head.in_features, 1024)
+        self.visual = m = timm.create_model('efficientnetv2_rw_t', pretrained=True)
+        self.visual.classifier = torch.nn.Identity()
+        # self.visual.head = nn.Linear(self.visual.head.in_features, 1024)
         self.latent = nn.Parameter(torch.rand(out_modes, embed_dim + 16), requires_grad=True)
         self.embeder = InitEmbedding(inp_dim=4, out_dim=embed_dim)
         self.encoder = Encoder(inp_dim, embed_dim, num_blocks, use_vis=use_vis, dr_rate=dr_rate)
@@ -430,7 +422,7 @@ class AttPredictorPecNet(nn.Module):
         rasters = rasterize_batch(data, True)
         maps = torch.tensor(np.concatenate(rasters)).permute(0, 3, 1, 2)/255.
         maps[:, :3] += maps[:, 3:].sum(1).unsqueeze(1)
-        maps = maps[:, :3]
+        maps = maps[:, :3].cuda()
         me = self.visual(maps).cuda()
         # positional embedder
         # torch.tensor(np.stack(rasters[0] + rasters[1]))

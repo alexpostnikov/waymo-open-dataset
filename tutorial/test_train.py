@@ -251,7 +251,7 @@ test_path = os.path.join(config.dir_data, "testing/testing_tfexample.tfrecord-*-
 # "/media/robot/hdd/waymo_dataset/tf_example/training/"
 train_dataset = CustomImageDataset(train_tfrecord_path, context_description)
 test_dataset = CustomImageDataset(test_path, context_description)
-train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, num_workers=0)
+train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, num_workers=12)
 test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, num_workers=0)
 
 
