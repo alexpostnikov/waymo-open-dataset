@@ -44,6 +44,39 @@ def create_subm(model,  loader):
                 if sid not in RES:
                     RES[sid] = []
 
+                RES[sid].append(
+                    {"aid": aid, "conf": conf, "pred": p}
+                )
+
+        selector = np.arange(14, 80 + 1, 5)
+        for scenario_id, data in tqdm(RES.items()):
+            scenario_predictions = motion_challenge_submission.scenario_predictions.add()
+            scenario_predictions.scenario_id = scenario_id
+            prediction_set = scenario_predictions.single_predictions
+
+            for d in data:
+                predictions = prediction_set.predictions.add()
+                predictions.object_id = int(d["aid"])
+
+                # y = d["yaw"]
+                # rot_matrix = np.array([
+                #     [np.cos(y), -np.sin(y)],
+                #     [np.sin(y), np.cos(y)],
+                # ])
+
+                for i in np.argsort(-d["conf"]):
+                    scored_trajectory = predictions.trajectories.add()
+                    scored_trajectory.confidence = d["conf"][i]
+
+                    trajectory = scored_trajectory.trajectory
+
+                    p = d["pred"][selector][i]  #@ rot_matrix + d["center"]
+
+                    trajectory.center_x.extend(p[:, 0])
+                    trajectory.center_y.extend(p[:, 1])
+
+        with open("file", "wb") as f:
+            f.write(motion_challenge_submission.SerializeToString())
 
 def train(model, loader, optimizer, num_ep=10):
     losses = torch.rand(0)
