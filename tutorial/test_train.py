@@ -167,15 +167,32 @@ context_description = {
     
     "state/current/x": 'float',
     "state/current/y": 'float',
+    "state/current/valid": "int",
     "state/past/x": 'float',
     "state/past/y": 'float',
+    "state/past/valid": "int",
     "state/current/velocity_x": 'float',
     "state/current/velocity_y": 'float',
     "state/future/x": 'float',
     "state/future/y": 'float',
     "state/future/valid": 'int',
-    "state/current/valid": "int",
-    "state/past/valid": "int",
+    "state/past/vel_yaw": "float",
+    "state/current/vel_yaw": "float",
+    "state/past/bbox_yaw": "float",
+    "state/current/bbox_yaw": "float",
+    "state/id" : "float",
+    "state/type" : "float",
+    "roadgraph_samples/id": "int",
+    "roadgraph_samples/type": "int",
+    "roadgraph_samples/valid": "int",
+    # "traffic_light_state/current/id": "float",
+    "traffic_light_state/current/valid": "int",
+    "state/current/width": "float",
+    "state/current/length": "float",
+    "traffic_light_state/current/state": "int",
+# "raffic_light_state/current/state": "float",
+
+
     "state/tracks_to_predict": "int",
     'roadgraph_samples/xyz': "float",
 }
@@ -248,7 +265,7 @@ net = torch.nn.DataParallel(net)
 optimizer = optim.Adam(net.parameters(), lr=wandb.config["learning_rate"])
 scheduler = get_cosine_with_hard_restarts_schedule_with_warmup(
             optimizer=optimizer,
-            num_warmup_steps=20,
+            num_warmup_steps=200,
             num_training_steps=(22000*128 / config.exp_batch_size) * wandb.config["epochs"],
             num_cycles=wandb.config["epochs"]) 
 net = net.to(device)
