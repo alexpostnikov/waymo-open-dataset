@@ -5,9 +5,44 @@ import numpy as np
 from einops import rearrange
 from test.visualize import vis_cur_and_fut
 import wandb
-
+from waymo_open_dataset.protos import motion_submission_pb2
 
 # from test_train import get_ade_from_pred_speed_with_mask, get_speed_ade_with_mask
+def create_subm(model,  loader):
+    motion_challenge_submission = motion_submission_pb2.MotionChallengeSubmission()
+    motion_challenge_submission.account_name = "AlexPostnik"
+    authors = "postnikov,gamaynov"
+    motion_challenge_submission.authors.extend(authors.split(","))
+    motion_challenge_submission.submission_type = (
+        motion_submission_pb2.MotionChallengeSubmission.SubmissionType.MOTION_PREDICTION
+    )
+    motion_challenge_submission.unique_method_name = "iab"
+    model.eval()
+    RES = {}
+    with torch.no_grad():
+        pbar = tqdm(loader)
+        for chank, data in enumerate(pbar):
+            if chank>10:
+                break
+            logits, confidences, goals, goal_vector, rot_mat, rot_mat_inv = model(data)
+
+            logits = logits.cpu().numpy()
+            confidences = confidences.cpu().numpy()
+            mask = data["state/tracks_to_predict"].reshape(-1,128)>0
+            agent_id = data["state/id"].cpu()[mask].numpy()
+            scenario_id = data["scenario/id"]  #?
+            scenario_id = [sc.numpy().tobytes().decode("utf-8") for sc in scenario_id]
+            scenarios_id = []
+            for bn, scenario in enumerate(scenario_id):
+                [scenarios_id.append(scenario) for i in range((mask.nonzero()[:,0] == bn).sum())]
+            # next(iter(test_loader))["scenario/id"][0].numpy().tobytes().decode("utf-8")
+            # center = center.cpu().numpy()
+            # yaw = yaw.cpu().numpy()
+            for p, conf, aid, sid in zip(
+                    logits, confidences, agent_id, scenarios_id,
+            ):
+                if sid not in RES:
+                    RES[sid] = []
 
 
 def train(model, loader, optimizer, num_ep=10):

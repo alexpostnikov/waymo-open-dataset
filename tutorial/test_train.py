@@ -9,7 +9,7 @@ import tensorflow as tf
 
 from test.models import Model, SimplModel, MultyModel, PercieverBased, MapLess
 from test.iab import AttPredictorPecNet
-from test.train import train, train_multymodal
+from test.train import train, train_multymodal, create_subm
 from test.visualize import vis_cur_and_fut
 from test.train import get_speed_ade_with_mask, get_ade_from_pred_speed_with_mask
 from test.config import build_parser
@@ -164,7 +164,6 @@ traffic_light_features = {
 }
 
 context_description = {
-    
     "state/current/x": 'float',
     "state/current/y": 'float',
     "state/past/x": 'float',
@@ -178,6 +177,21 @@ context_description = {
     "state/past/valid": "int",
     "state/tracks_to_predict": "int",
     'roadgraph_samples/xyz': "float",
+    "scenario/id": "byte",
+    "state/past/vel_yaw": "float",
+    "state/current/vel_yaw": "float",
+    "state/past/bbox_yaw": "float",
+    "state/current/bbox_yaw": "float",
+    "state/id" : "float",
+    "state/type" : "float",
+    "roadgraph_samples/id": "int",
+    "roadgraph_samples/type": "int",
+    "roadgraph_samples/valid": "int",
+    "traffic_light_state/current/valid": "int",
+    "state/current/width": "float",
+    "state/current/length": "float",
+    "traffic_light_state/current/state": "int",
+
 }
 
 # from pathlib import Path
@@ -289,6 +303,7 @@ def overfit_test(model, loader, optimizer):
     im = vis_cur_and_fut(data, outputs)
     plt.imshow(im)
 
+create_subm(net, test_loader)
 train_multymodal(net, (train_loader, test_loader), optimizer, checkpointer=checkpointer, num_ep=wandb.config["epochs"],
                  logger=wandb, use_every_nth_prediction=config.use_every_nth_prediction, scheduler=scheduler)
 
