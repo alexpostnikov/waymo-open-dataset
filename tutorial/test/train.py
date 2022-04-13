@@ -15,7 +15,6 @@ def create_subm(model,  loader):
         print("fake subm!!!")
         print("fake subm!!!")
         print("fake subm!!!")
-    # print(model)
     motion_challenge_submission = motion_submission_pb2.MotionChallengeSubmission()
 
     motion_challenge_submission.account_name = "alex.postnikov@skolkovotech.ru"
