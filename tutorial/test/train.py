@@ -17,7 +17,7 @@ def create_subm(model,  loader):
         print("fake subm!!!")
     # print(model)
     motion_challenge_submission = motion_submission_pb2.MotionChallengeSubmission()
-    motion_challenge_submission.account_name = "AlexPostnik"
+    motion_challenge_submission.account_name = "alex.postnikov@skolkovotech.ru"
     authors = "postnikov,gamaynov"
     motion_challenge_submission.authors.extend(authors.split(","))
     motion_challenge_submission.submission_type = (
@@ -78,12 +78,12 @@ def create_subm(model,  loader):
 
                     trajectory = scored_trajectory.trajectory
 
-                    p = d["pred"][selector][i]  #@ rot_matrix + d["center"]
+                    p = d["pred"][selector, i]  #@ rot_matrix + d["center"]
 
                     trajectory.center_x.extend(p[:, 0])
                     trajectory.center_y.extend(p[:, 1])
 
-        with open("file", "wb") as f:
+        with open("file.pb", "wb") as f:
             f.write(motion_challenge_submission.SerializeToString())
 
 def train(model, loader, optimizer, num_ep=10):
