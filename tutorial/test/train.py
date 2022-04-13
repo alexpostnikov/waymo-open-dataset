@@ -150,7 +150,7 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
     pbar = tqdm(train_loader)
     for chank, data in enumerate(pbar):
         optimizer.zero_grad()
-        poses, confs, goals, goal_vector,  rot_mat, rot_mat_inv = model(data)
+        poses, confs, goals, goal_vector,  rot_mat, rot_mat_inv = model(data, train=False)
         gmm = goal_vector_to_gmm(goal_vector,  rot_mat_inv)
         mask = data["state/tracks_to_predict"]
         valid = data["state/future/valid"].reshape(-1, 128, 80)[mask > 0].to(poses.device)[:, use_every_nth_prediction - 1::use_every_nth_prediction]
