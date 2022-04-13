@@ -17,9 +17,10 @@ def create_subm(model,  loader):
         print("fake subm!!!")
     # print(model)
     motion_challenge_submission = motion_submission_pb2.MotionChallengeSubmission()
+
     motion_challenge_submission.account_name = "alex.postnikov@skolkovotech.ru"
     authors = "postnikov,gamaynov"
-    motion_challenge_submission.authors.extend(authors.split(","))
+    # motion_challenge_submission.authors.extend(authors.split(","))
     motion_challenge_submission.submission_type = (
         motion_submission_pb2.MotionChallengeSubmission.SubmissionType.MOTION_PREDICTION
     )
@@ -30,10 +31,10 @@ def create_subm(model,  loader):
         pbar = tqdm(loader, total=int(22000*128//479*150//loader.batch_size))
         for chank, data in enumerate(pbar):
             logits, confidences, goals, goal_vector, rot_mat, rot_mat_inv = model(data)
-
+            logits = apply_tr(logits, rot_mat_inv)
             logits = logits.cpu().numpy()
             confidences = confidences.cpu().numpy()
-            mask = data["state/tracks_to_predict"].reshape(-1,128)>0
+            mask = data["state/tracks_to_predict"].reshape(-1, 128) > 0
             agent_id = data["state/id"].cpu()[mask].numpy()
             scenario_id = data["scenario/id"]
             try:
@@ -85,6 +86,7 @@ def create_subm(model,  loader):
 
         with open("file.pb", "wb") as f:
             f.write(motion_challenge_submission.SerializeToString())
+        return
 
 def train(model, loader, optimizer, num_ep=10):
     losses = torch.rand(0)
