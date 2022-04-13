@@ -25,7 +25,8 @@ def create_subm(model,  loader):
     )
     motion_challenge_submission.unique_method_name = "iab"
     model.eval()
-    model.use_gt_goals = False
+    # model.use_gt_goals = False
+    model.module.use_gt_goals = False
     RES = {}
     with torch.no_grad():
         pbar = tqdm(loader, total=int(22000*128//479*150//loader.batch_size))
