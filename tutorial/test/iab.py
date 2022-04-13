@@ -417,7 +417,7 @@ class AttPredictorPecNet(nn.Module):
         self.decoder_goals = DecoderGoals(embed_dim, 12, out_modes, dr_rate=dr_rate)
         self.decoder_trajs = DecoderTraj2(embed_dim, 12, out_modes, out_dim, out_horiz, dr_rate)
 
-    def forward(self, data):
+    def forward(self, data, train=True):
         ### xyz emb
         bs = data["roadgraph_samples/xyz"].shape[0]
         masks = data["state/tracks_to_predict"].reshape(-1, 128) > 0
@@ -475,8 +475,10 @@ class AttPredictorPecNet(nn.Module):
 
         ## find where no final goal at timestamp 80
         no_gt_future_indexes = data["state/future/valid"].reshape(-1,128,80)[data["state/tracks_to_predict"] > 0][:,-1] == 0
-        gt_goals[no_gt_future_indexes] = gmm.component_distribution.loc[no_gt_future_indexes]
-
+        if train:
+            gt_goals[no_gt_future_indexes] = gmm.component_distribution.loc[no_gt_future_indexes]
+        else:
+            gt_goals = gmm.component_distribution.loc
         predictions, confidences = self.decoder_trajs(x, gt_goals)
         ps = predictions.shape
         ## rotate goals back
