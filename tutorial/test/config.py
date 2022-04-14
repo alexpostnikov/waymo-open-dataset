@@ -74,6 +74,21 @@ def build_parser():
     parser.add_argument(
         '--exp_num_epochs', type=int, default=5)
 
+    parser.add_argument(
+        '--exp_num_workers', type=int, default=3)
+    parser.add_argument(
+        '--exp_use_vis', type="bool", default=False)
+    parser.add_argument(
+        '--exp_use_points', type="bool", default=False)
+    parser.add_argument(
+        '--exp_inp_dim', type=int, default=1024)
+
+    parser.add_argument(
+        '--exp_embed_dim', type=int, default=128)
+    parser.add_argument(
+        '--exp_num_blocks', type=int, default=4)
+
+
 
     ###########################################################################
     # #### Model ##############################################################
