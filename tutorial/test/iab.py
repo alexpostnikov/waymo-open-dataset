@@ -7,7 +7,9 @@ import torch.distributions as D
 # import numpy as np
 # import timm
 from test.pointNet import PointNetfeat
-
+import timm
+import numpy as np
+from test.rasterization import rasterize_batch
 
 def get_n_params(model):
     pp = 0
@@ -193,9 +195,9 @@ class VisualAttentionTransformer(nn.Module):
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.att = nn.MultiheadAttention(embed_dim + 16, num_heads, dropout=dr_rate)
+        self.v_mlp = nn.Linear(inp_dim, embed_dim + 16)
+        self.k_mlp = nn.Linear(inp_dim, embed_dim + 16)
         self.q_mlp = nn.Linear(embed_dim + 16, embed_dim + 16)
-        self.k_mlp = nn.Linear(embed_dim, embed_dim + 16)
-        self.v_mlp = nn.Linear(embed_dim, embed_dim + 16)
         self.silly_masking = True
         self.layer_norm = nn.LayerNorm(embed_dim + 16)
 
@@ -214,21 +216,27 @@ class VisualAttentionTransformer(nn.Module):
 
 
 class PoseEncoderBlock(nn.Module):
-    def __init__(self, inp_dim=64, embed_dim=64, use_vis=True, use_segm=False, dr_rate=0):
+    def __init__(self, inp_dim=64, embed_dim=64, use_vis=True, use_segm=False, use_points=True, dr_rate=0):
         super().__init__()
         self.use_vis = use_vis
+        self.use_points = use_points
         self.use_segm = use_segm
         self.sat = SelfAttention(inp_dim, embed_dim, dr_rate=dr_rate)
         self.pat = PoseAttention(inp_dim, embed_dim, data_dim=inp_dim, dr_rate=dr_rate)
         if use_vis:
             self.va = VisualAttentionTransformer(inp_dim, embed_dim, dr_rate=dr_rate)
+        if use_points:
+            self.pa = VisualAttentionTransformer(inp_dim, embed_dim, dr_rate=dr_rate)
 
-    def forward(self, x, image_emb, agent_h_emb):
+    def forward(self, x, image_emb, agent_h_emb, points_emb):
 
         x = x + self.pat(x, agent_h_emb)
 
         if self.use_vis:
             x = x + self.va(image_emb, x)
+
+        if self.use_points:
+            x = x + self.pa(points_emb, x)
 
         x = x + self.sat(x, None)
 
@@ -236,15 +244,15 @@ class PoseEncoderBlock(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, inp_dim=64, embed_dim=64, num_blocks=16, use_vis=True, dr_rate=0):
+    def __init__(self, inp_dim=64, embed_dim=64, num_blocks=16, use_vis=True, use_points=True, dr_rate=0):
         super().__init__()
         self.layers = nn.ModuleList(
-            [PoseEncoderBlock(inp_dim, embed_dim, use_vis=use_vis, dr_rate=dr_rate) for _ in
+            [PoseEncoderBlock(inp_dim, embed_dim, use_vis=use_vis, use_points=use_points, dr_rate=dr_rate) for _ in
              range(num_blocks)])
 
-    def forward(self, x, image_emb, agent_h_emb):
+    def forward(self, x, image_emb, agent_h_emb, points_emb):
         for pose_encoder in self.layers:
-            x = x + pose_encoder(x, image_emb, agent_h_emb)
+            x = x + pose_encoder(x, image_emb, agent_h_emb, points_emb)
         return x
 
 
@@ -328,17 +336,6 @@ class DecoderTraj2(nn.Module):
                                           nn.Linear(8, inp_dim//2))
         out_shape = out_dim * out_modes * out_horiz + self.out_modes
         self.out_shape = out_shape
-        # self.layers = nn.Sequential(
-        #     nn.Linear(inp_dim + inp_dim//2 + 16, inp_dim * 2),
-        #     nn.ReLU(),
-        #     nn.Dropout(dr_rate),
-        #     nn.LayerNorm(inp_dim * 2),
-        #     nn.Linear(inp_dim * 2, inp_dim),
-        #     nn.ReLU(),
-        #     nn.Dropout(dr_rate),
-        #     nn.LayerNorm(inp_dim),
-        #     nn.Linear(inp_dim, out_shape * 2)
-        # )
 
         self.outlayers = nn.Sequential(
             nn.Linear(out_shape * 2 + 128, out_shape * 4),
@@ -374,8 +371,7 @@ class DecoderTraj2(nn.Module):
         confidences = torch.softmax(self.conf_mlp(predictions[:, -self.out_modes:, -1]), dim=-1)
         trajectories = predictions[:, -1, :self.out_shape - self.out_modes].reshape(bs, self.out_modes, self.out_horiz,
                                                                                     self.out_dim)
-        # trajectories = predictions[:, :-self.out_modes].reshape(bs, self.out_modes, self.out_horiz, self.out_dim)
-        # trajectories = trajectories.cumsum(2)
+
         return trajectories, confidences
 
 
@@ -408,13 +404,19 @@ def create_rot_matrix(state_masked):
 
 class AttPredictorPecNet(nn.Module):
     def __init__(self, inp_dim=32, embed_dim=128, num_blocks=8, out_modes=1, out_dim=2, out_horiz=12,
-                 dr_rate=0.0, use_vis=True):
+                 dr_rate=0.0, use_vis=True, use_points=True, use_map=True):
         super().__init__()
         self.use_gt_goals = False
-        self.pointNet = PointNetfeat(global_feat=True)
+        self.use_points = use_points
+        if use_points:
+            self.pointNet = PointNetfeat(global_feat=True)
+        self.use_vis = use_vis
+        if use_vis:
+            self.visual = timm.create_model('efficientnetv2_rw_t', pretrained=True)
+            self.visual.classifier = torch.nn.Identity()
         self.latent = nn.Parameter(torch.rand(out_modes, embed_dim + 16), requires_grad=True)
         self.embeder = InitEmbedding(inp_dim=4, out_dim=embed_dim)
-        self.encoder = Encoder(inp_dim, embed_dim, num_blocks, use_vis=use_vis, dr_rate=dr_rate)
+        self.encoder = Encoder(inp_dim, embed_dim, num_blocks, use_vis=use_vis, use_points=use_points, dr_rate=dr_rate)
         self.decoder_goals = DecoderGoals(embed_dim, 12, out_modes, dr_rate=dr_rate)
         self.decoder_trajs = DecoderTraj2(embed_dim, 12, out_modes, out_dim, out_horiz, dr_rate)
 
@@ -446,21 +448,30 @@ class AttPredictorPecNet(nn.Module):
         state_masked[:, :-1, 2:] = state_masked[:, :-1, :2] - state_masked[:, 1:, :2]
         agent_h_emb = self.embeder(state_masked)
         # pointnet embedder
-        xyz = data["roadgraph_samples/xyz"].reshape(bs, -1, 3)[:, ::2].cuda()
-        xyz_personal = torch.zeros([0, xyz.shape[1], xyz.shape[2]], device=xyz.device)
-        ## rotate pointclouds
-        # ...
-        for i, index in enumerate(masks.nonzero()):
-            xyz_p = torch.ones([xyz.shape[1], xyz.shape[2]], device=xyz.device)
-            xyz_p[:, :2] = xyz[index[0], :, :2].clone()
-            xyz_p = (rot_mat[i] @ xyz_p.T).T
-            xyz_personal = torch.cat((xyz_personal, xyz_p.unsqueeze(0)), dim=0)
-        xyz_emb, _, _ = self.pointNet(xyz_personal.permute(0, 2, 1))
+        xyz_emb = None
+        if self.use_points:
+            xyz = data["roadgraph_samples/xyz"].reshape(bs, -1, 3)[:, ::2].cuda()
+            xyz_personal = torch.zeros([0, xyz.shape[1], xyz.shape[2]], device=xyz.device)
+            ## rotate pointclouds
+            # ...
+            for i, index in enumerate(masks.nonzero()):
+                xyz_p = torch.ones([xyz.shape[1], xyz.shape[2]], device=xyz.device)
+                xyz_p[:, :2] = xyz[index[0], :, :2].clone()
+                xyz_p = (rot_mat[i] @ xyz_p.T).T
+                xyz_personal = torch.cat((xyz_personal, xyz_p.unsqueeze(0)), dim=0)
+            xyz_emb, _, _ = self.pointNet(xyz_personal.permute(0, 2, 1))
         # xyz_emb = xyz_emb.repeat(8, 1)
         ####
-
+        img_emb = None
+        if self.use_vis:
+            rasters = rasterize_batch(data, True)
+            maps = torch.tensor(np.concatenate(rasters)).permute(0, 3, 1, 2) / 255.
+            maps[:, 0] += maps[:, 3:].sum(1)
+            maps[:, 0] = maps[:, 0]/5
+            maps = maps[:, :3].to(self.latent.device) #cuda()
+            img_emb = self.visual(maps) #.to(self.latent.device).cuda()
         x = self.latent.unsqueeze(0).repeat(bsr, 1, 1)
-        x = self.encoder(x, xyz_emb, agent_h_emb)
+        x = self.encoder(x, img_emb, agent_h_emb, xyz_emb)
         gmm, goal_vector = self.decoder_goals(x)
         # goals = gmm.mean
         goals = gmm.component_distribution.mean.clone()

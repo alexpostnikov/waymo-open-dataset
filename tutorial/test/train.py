@@ -7,10 +7,12 @@ from test.visualize import vis_cur_and_fut
 import wandb
 from waymo_open_dataset.protos import motion_submission_pb2
 
+
 # from test_train import get_ade_from_pred_speed_with_mask, get_speed_ade_with_mask
-def create_subm(model,  loader):
+def create_subm(model, loader):
     try:
-        model.load_state_dict(torch.load("/home/jovyan/waymo-open-dataset/checkpoints/model-seed-0-epoch-1.pt", map_location="cuda"))
+        model.load_state_dict(
+            torch.load("/home/jovyan/waymo-open-dataset/checkpoints/model-seed-0-epoch-1.pt", map_location="cuda"))
     except:
         print("fake subm!!!")
         print("fake subm!!!")
@@ -29,7 +31,7 @@ def create_subm(model,  loader):
     model.module.use_gt_goals = False
     RES = {}
     with torch.no_grad():
-        pbar = tqdm(loader, total=int(22000*128//479*150//loader.batch_size))
+        pbar = tqdm(loader, total=int(22000 * 128 // 479 * 150 // loader.batch_size))
         for chank, data in enumerate(pbar):
             logits, confidences, goals, goal_vector, rot_mat, rot_mat_inv = model(data)
             logits = apply_tr(logits, rot_mat_inv)
@@ -44,7 +46,7 @@ def create_subm(model,  loader):
                 pass
             scenarios_id = []
             for bn, scenario in enumerate(scenario_id):
-                [scenarios_id.append(scenario) for i in range((mask.nonzero()[:,0] == bn).sum())]
+                [scenarios_id.append(scenario) for i in range((mask.nonzero()[:, 0] == bn).sum())]
             # next(iter(test_loader))["scenario/id"][0].numpy().tobytes().decode("utf-8")
             # center = center.cpu().numpy()
             # yaw = yaw.cpu().numpy()
@@ -80,7 +82,7 @@ def create_subm(model,  loader):
 
                     trajectory = scored_trajectory.trajectory
 
-                    p = d["pred"][selector, i]  #@ rot_matrix + d["center"]
+                    p = d["pred"][selector, i]  # @ rot_matrix + d["center"]
 
                     trajectory.center_x.extend(p[:, 0])
                     trajectory.center_y.extend(p[:, 1])
@@ -88,6 +90,7 @@ def create_subm(model,  loader):
         with open("file.pb", "wb") as f:
             f.write(motion_challenge_submission.SerializeToString())
         return
+
 
 def train(model, loader, optimizer, num_ep=10):
     losses = torch.rand(0)
@@ -116,7 +119,6 @@ def train(model, loader, optimizer, num_ep=10):
 
 def train_multymodal(model, loaders, optimizer, num_ep=10, checkpointer=None, logger=None,
                      use_every_nth_prediction=1, scheduler=None):
-
     train_loader, test_loader = loaders
     for epoch in range(num_ep):  # loop over the dataset multiple times
         model.train()
@@ -125,8 +127,7 @@ def train_multymodal(model, loaders, optimizer, num_ep=10, checkpointer=None, lo
         checkpointer.save(epoch, train_losses.mean().item())
 
 
-def goal_vector_to_gmm(predictions,  rot_mat_inv, out_modes=6):
-
+def goal_vector_to_gmm(predictions, rot_mat_inv, out_modes=6):
     bs = predictions.shape[0]
     mean_predictions = predictions[:, :2 * out_modes].reshape(bs, out_modes, 2)
     cov_predictions = 3 * torch.eye(2).unsqueeze(0).unsqueeze(0).repeat(bs, out_modes, 1, 1).to(
@@ -144,6 +145,7 @@ def goal_vector_to_gmm(predictions,  rot_mat_inv, out_modes=6):
     gmm = torch.distributions.MixtureSameFamily(mix, distr)
     return gmm
 
+
 def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_prediction=1, scheduler=None):
     losses = torch.rand(0)
     mades = torch.rand(0)
@@ -151,25 +153,32 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
     pbar = tqdm(train_loader)
     for chank, data in enumerate(pbar):
         optimizer.zero_grad()
-        poses, confs, goals, goal_vector,  rot_mat, rot_mat_inv = model(data)
-        gmm = goal_vector_to_gmm(goal_vector,  rot_mat_inv)
+        poses, confs, goals, goal_vector, rot_mat, rot_mat_inv = model(data)
+        gmm = goal_vector_to_gmm(goal_vector, rot_mat_inv)
         mask = data["state/tracks_to_predict"]
-        valid = data["state/future/valid"].reshape(-1, 128, 80)[mask > 0].to(poses.device)[:, use_every_nth_prediction - 1::use_every_nth_prediction]
+        valid = data["state/future/valid"].reshape(-1, 128, 80)[mask > 0].to(poses.device)[:,
+                use_every_nth_prediction - 1::use_every_nth_prediction]
         fut_path = get_future(data).to(poses.device).permute(0, 2, 1, 3)[mask > 0]
 
         fut_ext = torch.cat([fut_path, torch.ones_like(fut_path[:, :, :1])], -1)
-        fut_path = torch.bmm(rot_mat, fut_ext.permute(0,2,1)).permute(0, 2, 1)[:, use_every_nth_prediction - 1::use_every_nth_prediction, :2]
+        fut_path = torch.bmm(rot_mat, fut_ext.permute(0, 2, 1)).permute(0, 2, 1)[:,
+                   use_every_nth_prediction - 1::use_every_nth_prediction, :2]
         goal_nll = -gmm.log_prob(fut_path[:, -1])[valid[:, -1] > 0]
 
-        m_ades = (torch.norm((fut_path.unsqueeze(2) - poses), dim=-1)*valid.unsqueeze(2)).mean(1).min(-1).values.mean()
-        m_fdes = (torch.norm((fut_path[:, -1].unsqueeze(1) - poses[:, -1]), dim=-1) * valid[:, -1].unsqueeze(1)).min(-1).values
-        m_fdes = m_fdes[m_fdes > 0].mean()
-
+        m_ades = (torch.norm((fut_path.unsqueeze(2) - poses), dim=-1) * valid.unsqueeze(2)).mean(1).min(
+            -1).values.mean()
+        m_fdes = (torch.norm((fut_path[:, -1].unsqueeze(1) - poses[:, -1]), dim=-1) * valid[:, -1].unsqueeze(1)).min(
+            -1).values
+        m_fdes = m_fdes[m_fdes > 0]
+        if len(m_fdes) > 0:
+            m_fde = m_fdes.mean()
+        else:
+            m_fde = torch.tensor([0.]).to(m_fdes.device)
         fut_path_masked = fut_path.unsqueeze(2) * valid.unsqueeze(2).unsqueeze(2)
         pred_masked = poses * valid.unsqueeze(2).unsqueeze(2)
         loss_nll = -log_likelihood(fut_path_masked, pred_masked, confs).mean()
         m_ade = m_ades.mean()
-        m_fde = m_fdes.mean()
+
         loss = 0.01 * m_ade + 1 * loss_nll + 1 * goal_nll.mean() + 0.001 * m_fde
         loss.backward()
 
@@ -212,9 +221,10 @@ def apply_tr(poses, tr):
                           times=times, modes=modes)[..., :2]
     return poses_exp
 
+
 def uni_ade_poses(data, predictions, use_every_nth_prediction=1):
     bs, num_ped, future_steps, _ = predictions.shape
-    gt_fut = get_future(data).to(predictions.device)[:, use_every_nth_prediction-1::use_every_nth_prediction]
+    gt_fut = get_future(data).to(predictions.device)[:, use_every_nth_prediction - 1::use_every_nth_prediction]
     mask = data["state/tracks_to_predict"].reshape(-1, 128)  # .repeat(1, 1, 80) > 0)
     gt_fut = gt_fut.permute(0, 2, 1, 3)[mask > 0]
     # assert gt_fut.shape == torch.Size([bs, future_steps, num_ped, 2])
@@ -224,8 +234,8 @@ def uni_ade_poses(data, predictions, use_every_nth_prediction=1):
     # assert cur.shape == torch.Size([bs, 1, num_ped, 2])
     gt_fut = gt_fut - cur
     fut_valid = data["state/future/valid"].reshape(-1, 128, 80)[mask > 0].unsqueeze(2).to(predictions.device)
-    fut_valid = fut_valid[:, use_every_nth_prediction-1::use_every_nth_prediction]
-    err = (predictions[:, 0] - gt_fut)[fut_valid[:,:,0]>0]
+    fut_valid = fut_valid[:, use_every_nth_prediction - 1::use_every_nth_prediction]
+    err = (predictions[:, 0] - gt_fut)[fut_valid[:, :, 0] > 0]
     dist = torch.norm(err, dim=-1)
     return dist
 
@@ -234,6 +244,7 @@ def goals_nll(gmm, data):
     gt_fut = get_future(data).to(gmm.device)[:, -1]
     mask = data["state/tracks_to_predict"].reshape(-1, 128)  # .repeat(1, 1, 80) > 0)
     gt_fut = gt_fut[mask > 0]
+
 
 def uni_fde_poses(data, predictions):
     bs, num_ped, future_steps, _ = predictions.shape
@@ -249,7 +260,7 @@ def uni_fde_poses(data, predictions):
     fut_valid = data["state/future/valid"].reshape(-1, 128, 80)[mask > 0].unsqueeze(2).to(predictions.device)
     err = (predictions[:, 0, -1] - gt_fut) * fut_valid[:, -1]
     dist = torch.norm(err, dim=-1)
-    return dist[dist>0]
+    return dist[dist > 0]
 
 
 def get_future(data):
@@ -411,7 +422,8 @@ def pytorch_neg_multi_log_likelihood_batch(data, logits, confidences, use_every_
     # error (batch_size, num_modes, future_len)
     # print(gt.shape, logits_moved.shape, avails.shape)
     error = torch.sum(
-        ((gt.unsqueeze(1) - logits_moved) * valid[data["state/tracks_to_predict"].reshape(-1, 128)>0].unsqueeze(1).unsqueeze(-1).cuda()) ** 2, dim=-1
+        ((gt.unsqueeze(1) - logits_moved) * valid[data["state/tracks_to_predict"].reshape(-1, 128) > 0].unsqueeze(
+            1).unsqueeze(-1).cuda()) ** 2, dim=-1
     )  # reduce coords and use availability
 
     with np.errstate(
