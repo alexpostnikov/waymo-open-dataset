@@ -9,7 +9,7 @@ import tensorflow as tf
 
 from test.models import Model, SimplModel, MultyModel, PercieverBased, MapLess
 from test.iab import AttPredictorPecNet
-from test.train import train, train_multymodal
+from test.train import train, train_multymodal, create_subm
 from test.visualize import vis_cur_and_fut
 from test.train import get_speed_ade_with_mask, get_ade_from_pred_speed_with_mask
 from test.config import build_parser
@@ -164,7 +164,6 @@ traffic_light_features = {
 }
 
 context_description = {
-    
     "state/current/x": 'float',
     "state/current/y": 'float',
     "state/past/x": 'float',
@@ -178,6 +177,21 @@ context_description = {
     "state/past/valid": "int",
     "state/tracks_to_predict": "int",
     'roadgraph_samples/xyz': "float",
+    "scenario/id": "byte",
+    "state/past/vel_yaw": "float",
+    "state/current/vel_yaw": "float",
+    "state/past/bbox_yaw": "float",
+    "state/current/bbox_yaw": "float",
+    "state/id" : "float",
+    "state/type" : "float",
+    "roadgraph_samples/id": "int",
+    "roadgraph_samples/type": "int",
+    "roadgraph_samples/valid": "int",
+    "traffic_light_state/current/valid": "int",
+    "state/current/width": "float",
+    "state/current/length": "float",
+    "traffic_light_state/current/state": "int",
+
 }
 
 # from pathlib import Path
@@ -227,10 +241,66 @@ wandb.config = {
     "batch_size": config.exp_batch_size
 }
 
+import re
+import collections
+np_str_obj_array_pattern = re.compile(r'[SaUO]')
+string_classes = (str, bytes)
+
+def d_collate_fn(batch):
+        r"""Puts each data field into a tensor with outer dimension batch size"""
+
+        elem = batch[0]
+        elem_type = type(elem)
+        if isinstance(elem, torch.Tensor):
+            out = None
+            if torch.utils.data.get_worker_info() is not None:
+                # If we're in a background process, concatenate directly into a
+                # shared memory tensor to avoid an extra copy
+                numel = sum(x.numel() for x in batch)
+                storage = elem.storage()._new_shared(numel)
+                out = elem.new(storage)
+            try:
+                return torch.stack(batch, 0, out=out)
+            except:
+                scenario_ids = [sc.numpy().tobytes().decode("utf-8") for sc in batch]
+                return scenario_ids
+                # scenarios_id = []
+                # for bn, scenario in enumerate(scenario_id):
+                #     [scenarios_id.append(scenario) for i in range((mask.nonzero()[:, 0] == bn).sum())]
+        elif elem_type.__module__ == 'numpy' and elem_type.__name__ != 'str_' \
+                and elem_type.__name__ != 'string_':
+            if elem_type.__name__ == 'ndarray' or elem_type.__name__ == 'memmap':
+                # array of string classes and object
+                if np_str_obj_array_pattern.search(elem.dtype.str) is not None:
+                    raise #TypeError(default_collate_err_msg_format.format(elem.dtype))
+
+                return d_collate_fn([torch.as_tensor(b) for b in batch])
+            elif elem.shape == ():  # scalars
+                return torch.as_tensor(batch)
+        elif isinstance(elem, float):
+            return torch.tensor(batch, dtype=torch.float64)
+        elif isinstance(elem, int):
+            return torch.tensor(batch)
+        elif isinstance(elem, string_classes):
+            return batch
+        elif isinstance(elem, collections.abc.Mapping):
+            return {key: d_collate_fn([d[key] for d in batch]) for key in elem}
+        elif isinstance(elem, tuple) and hasattr(elem, '_fields'):  # namedtuple
+            return elem_type(*(d_collate_fn(samples) for samples in zip(*batch)))
+        elif isinstance(elem, collections.abc.Sequence):
+            # check to make sure that the elements in batch have consistent size
+            it = iter(batch)
+            elem_size = len(next(it))
+            if not all(len(elem) == elem_size for elem in it):
+                raise RuntimeError('each element in list of batch should be of equal size')
+            transposed = zip(*batch)
+            return [d_collate_fn(samples) for samples in transposed]
+
+        raise #TypeError(default_collate_err_msg_format.format(elem_type))
 batch_size = config.exp_batch_size
 
 train_tfrecord_path = os.path.join(config.dir_data, "training/training_tfexample.*-of-01000")
-test_path = os.path.join(config.dir_data, "testing/testing_tfexample.tfrecord-*-of-00150")
+test_path = os.path.join(config.dir_data, "validation/validation_tfexample.tfrecord-*-of-00150")
 # "/media/robot/hdd/waymo_dataset/tf_example/training/"
 train_dataset = CustomImageDataset(train_tfrecord_path, context_description)
 test_dataset = CustomImageDataset(test_path, context_description)
@@ -289,6 +359,7 @@ def overfit_test(model, loader, optimizer):
     im = vis_cur_and_fut(data, outputs)
     plt.imshow(im)
 
+create_subm(net, test_loader)
 train_multymodal(net, (train_loader, test_loader), optimizer, checkpointer=checkpointer, num_ep=wandb.config["epochs"],
                  logger=wandb, use_every_nth_prediction=config.use_every_nth_prediction, scheduler=scheduler)
 

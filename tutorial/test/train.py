@@ -5,10 +5,89 @@ import numpy as np
 from einops import rearrange
 from test.visualize import vis_cur_and_fut
 import wandb
-
+from waymo_open_dataset.protos import motion_submission_pb2
 
 # from test_train import get_ade_from_pred_speed_with_mask, get_speed_ade_with_mask
+def create_subm(model,  loader):
+    try:
+        model.load_state_dict(torch.load("/home/jovyan/waymo-open-dataset/checkpoints/model-seed-0-epoch-1.pt", map_location="cuda"))
+    except:
+        print("fake subm!!!")
+        print("fake subm!!!")
+        print("fake subm!!!")
+    motion_challenge_submission = motion_submission_pb2.MotionChallengeSubmission()
 
+    motion_challenge_submission.account_name = "alex.postnikov@skolkovotech.ru"
+    authors = "postnikov,gamaynov"
+    # motion_challenge_submission.authors.extend(authors.split(","))
+    motion_challenge_submission.submission_type = (
+        motion_submission_pb2.MotionChallengeSubmission.SubmissionType.MOTION_PREDICTION
+    )
+    motion_challenge_submission.unique_method_name = "iab"
+    model.eval()
+    # model.use_gt_goals = False
+    model.module.use_gt_goals = False
+    RES = {}
+    with torch.no_grad():
+        pbar = tqdm(loader, total=int(22000*128//479*150//loader.batch_size))
+        for chank, data in enumerate(pbar):
+            logits, confidences, goals, goal_vector, rot_mat, rot_mat_inv = model(data)
+            logits = apply_tr(logits, rot_mat_inv)
+            logits = logits.cpu().numpy()
+            confidences = confidences.cpu().numpy()
+            mask = data["state/tracks_to_predict"].reshape(-1, 128) > 0
+            agent_id = data["state/id"].cpu()[mask].numpy()
+            scenario_id = data["scenario/id"]
+            try:
+                scenario_id = [sc.numpy().tobytes().decode("utf-8") for sc in scenario_id]
+            except:
+                pass
+            scenarios_id = []
+            for bn, scenario in enumerate(scenario_id):
+                [scenarios_id.append(scenario) for i in range((mask.nonzero()[:,0] == bn).sum())]
+            # next(iter(test_loader))["scenario/id"][0].numpy().tobytes().decode("utf-8")
+            # center = center.cpu().numpy()
+            # yaw = yaw.cpu().numpy()
+            for p, conf, aid, sid in zip(
+                    logits, confidences, agent_id, scenarios_id,
+            ):
+                if sid not in RES:
+                    RES[sid] = []
+
+                RES[sid].append(
+                    {"aid": aid, "conf": conf, "pred": p}
+                )
+
+        selector = np.arange(4, 80 + 1, 5)
+        for scenario_id, data in tqdm(RES.items()):
+            scenario_predictions = motion_challenge_submission.scenario_predictions.add()
+            scenario_predictions.scenario_id = scenario_id
+            prediction_set = scenario_predictions.single_predictions
+
+            for d in data:
+                predictions = prediction_set.predictions.add()
+                predictions.object_id = int(d["aid"])
+
+                # y = d["yaw"]
+                # rot_matrix = np.array([
+                #     [np.cos(y), -np.sin(y)],
+                #     [np.sin(y), np.cos(y)],
+                # ])
+
+                for i in np.argsort(-d["conf"]):
+                    scored_trajectory = predictions.trajectories.add()
+                    scored_trajectory.confidence = d["conf"][i]
+
+                    trajectory = scored_trajectory.trajectory
+
+                    p = d["pred"][selector, i]  #@ rot_matrix + d["center"]
+
+                    trajectory.center_x.extend(p[:, 0])
+                    trajectory.center_y.extend(p[:, 1])
+
+        with open("file.pb", "wb") as f:
+            f.write(motion_challenge_submission.SerializeToString())
+        return
 
 def train(model, loader, optimizer, num_ep=10):
     losses = torch.rand(0)
@@ -119,7 +198,7 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
 
         if (chank % 200) == 0:
             poses = apply_tr(poses, rot_mat_inv)
-            image = vis_cur_and_fut(data, poses, confs=confs)
+            image = vis_cur_and_fut(data, poses.detach().cpu(), confs=confs.detach().cpu())
             images = wandb.Image(image, caption="Top: Output, Bottom: Input")
             wandb.log({"examples": images})
     return losses

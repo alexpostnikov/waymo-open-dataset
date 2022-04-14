@@ -121,7 +121,10 @@ def visualize_one_step(states,
 def vis_cur_and_fut(decoded_example, predictions=None, size_pixels=1000, bn=0, confs=None):
     data = {}
     for key in decoded_example.keys():
-        data[key] = decoded_example[key][bn].detach().cpu().numpy()
+        try:
+            data[key] = decoded_example[key][bn].detach().cpu().numpy()
+        except:
+            pass
     center_x, center_y, color_map, current_states, current_states_mask, future_states, future_states_mask, \
     num_future_steps, num_past_steps, past_states, past_states_mask, roadgraph_xyz, width = prepare_data_for_vis(
         data)
