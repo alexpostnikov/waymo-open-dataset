@@ -410,7 +410,7 @@ class AttPredictorPecNet(nn.Module):
     def __init__(self, inp_dim=32, embed_dim=128, num_blocks=8, out_modes=1, out_dim=2, out_horiz=12,
                  dr_rate=0.0, use_vis=True):
         super().__init__()
-        self.use_gt_goals = True
+        self.use_gt_goals = False
         self.pointNet = PointNetfeat(global_feat=True)
         self.latent = nn.Parameter(torch.rand(out_modes, embed_dim + 16), requires_grad=True)
         self.embeder = InitEmbedding(inp_dim=4, out_dim=embed_dim)
