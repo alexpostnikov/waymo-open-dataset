@@ -10,7 +10,7 @@ from waymo_open_dataset.protos import motion_submission_pb2
 # from test_train import get_ade_from_pred_speed_with_mask, get_speed_ade_with_mask
 def create_subm(model,  loader):
     try:
-        model.load_state_dict(torch.load("/home/jovyan/waymo-open-dataset/model-seed-0-epoch-0.pt", map_location="cuda"))
+        model.load_state_dict(torch.load("/home/jovyan/waymo-open-dataset/checkpoints/model-seed-0-epoch-1.pt", map_location="cuda"))
     except:
         print("fake subm!!!")
         print("fake subm!!!")
@@ -151,7 +151,7 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
     pbar = tqdm(train_loader)
     for chank, data in enumerate(pbar):
         optimizer.zero_grad()
-        poses, confs, goals, goal_vector,  rot_mat, rot_mat_inv = model(data, train=False)
+        poses, confs, goals, goal_vector,  rot_mat, rot_mat_inv = model(data)
         gmm = goal_vector_to_gmm(goal_vector,  rot_mat_inv)
         mask = data["state/tracks_to_predict"]
         valid = data["state/future/valid"].reshape(-1, 128, 80)[mask > 0].to(poses.device)[:, use_every_nth_prediction - 1::use_every_nth_prediction]
@@ -198,7 +198,7 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
 
         if (chank % 200) == 0:
             poses = apply_tr(poses, rot_mat_inv)
-            image = vis_cur_and_fut(data, poses, confs=confs)
+            image = vis_cur_and_fut(data, poses.detach().cpu(), confs=confs.detach().cpu())
             images = wandb.Image(image, caption="Top: Output, Bottom: Input")
             wandb.log({"examples": images})
     return losses
