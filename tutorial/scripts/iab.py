@@ -6,10 +6,10 @@ import torch.distributions as D
 # import time
 # import numpy as np
 # import timm
-from test.pointNet import PointNetfeat
+from scripts.pointNet import PointNetfeat
 import timm
 import numpy as np
-from test.rasterization import rasterize_batch
+from scripts.rasterization import rasterize_batch
 
 def get_n_params(model):
     pp = 0

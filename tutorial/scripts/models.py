@@ -4,8 +4,8 @@ import os
 from einops import rearrange, repeat
 from numpy import pi
 import torch.nn.functional
-from test.perciever import Perceiver
-from test.pointNet import PointNetfeat
+from scripts.perciever import Perceiver
+from scripts.pointNet import PointNetfeat
 
 
 def fourier_encode(x, max_freq, num_bands=4):

@@ -7,13 +7,13 @@
 
 import tensorflow as tf
 
-from test.iab import AttPredictorPecNet
-from test.train import train_multymodal, create_subm
-from test.visualize import vis_cur_and_fut
-from test.train import get_speed_ade_with_mask, get_ade_from_pred_speed_with_mask
-from test.config import build_parser
-from test.models import Checkpointer
-from test.dataloaders import context_description, CustomImageDataset, d_collate_fn
+from scripts.iab import AttPredictorPecNet
+from scripts.train import train_multymodal, create_subm
+from scripts.visualize import vis_cur_and_fut
+from scripts.train import get_speed_ade_with_mask, get_ade_from_pred_speed_with_mask
+from scripts.config import build_parser
+from scripts.models import Checkpointer
+from scripts.dataloaders import context_description, CustomImageDataset, d_collate_fn
 
 tf.get_logger().setLevel('ERROR')
 

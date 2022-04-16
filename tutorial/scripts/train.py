@@ -3,7 +3,7 @@ from tqdm.auto import tqdm
 import torch.nn as nn
 import numpy as np
 from einops import rearrange
-from test.visualize import vis_cur_and_fut
+from scripts.visualize import vis_cur_and_fut
 import wandb
 from waymo_open_dataset.protos import motion_submission_pb2
 
