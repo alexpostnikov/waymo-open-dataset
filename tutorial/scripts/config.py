@@ -44,9 +44,9 @@ def build_parser():
     ###########################################################################
     # #### Data ###############################################################
     ###########################################################################
-    parser.add_argument(
-        '--data_num_workers', type=int, default=4,
-        help='Number of workers to use in PyTorch data loading.')
+    # parser.add_argument(
+    #     '--data_num_workers', type=int, default=4,
+    #     help='Number of workers to use in PyTorch data loading.')
 
 
     ###########################################################################
@@ -82,11 +82,12 @@ def build_parser():
         '--exp_use_points', type="bool", default=False)
     parser.add_argument(
         '--exp_inp_dim', type=int, default=1024)
-
     parser.add_argument(
         '--exp_embed_dim', type=int, default=128)
     parser.add_argument(
         '--exp_num_blocks', type=int, default=4)
+    parser.add_argument(
+        '--exp_use_rec', type="bool", default=False)
 
 
 

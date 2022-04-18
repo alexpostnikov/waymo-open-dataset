@@ -1,15 +1,13 @@
 import math
 import torch
 import torch.nn as nn
-from torchvision import models
 import torch.distributions as D
-# import time
-# import numpy as np
-# import timm
 from scripts.pointNet import PointNetfeat
+from scripts.rasterization import rasterize_batch
+from scripts.rgb_loader import RgbLoader
 import timm
 import numpy as np
-from scripts.rasterization import rasterize_batch
+from einops import rearrange
 
 def get_n_params(model):
     pp = 0
@@ -22,7 +20,7 @@ def get_n_params(model):
 
 
 class InitEmbedding(nn.Module):
-    def __init__(self, inp_dim=2, out_dim=64, dr_rate=0.1):
+    def __init__(self, inp_dim=2, out_dim=64, dr_rate=0.1, use_recurrent=False):
         super().__init__()
         self.layers = nn.Sequential(
             nn.Linear(inp_dim, 32),
@@ -36,6 +34,10 @@ class InitEmbedding(nn.Module):
             nn.Linear(128, out_dim)
         )
         self.silly_masking = False
+        self.use_recurrent = use_recurrent
+        if self.use_recurrent:
+            self.rec = nn.GRU(out_dim, out_dim)
+
 
     def masking(self, agent_h, agent_h_avail):
         if self.silly_masking:
@@ -44,10 +46,13 @@ class InitEmbedding(nn.Module):
 
     def forward(self, agent_h, agent_h_avail=None):
         agent_h = self.masking(agent_h, agent_h_avail)
-        return self.layers(agent_h)
+        out = self.layers(agent_h)
+        if self.use_recurrent:
+            out, (_) = self.rec(out)  # = nn.GRU(out_dim, out_dim)
+        return out
 
 
-def positionalencoding1d(d_model, length):
+def positionalencoding1d(d_model, length, device="cuda"):
     """
     :param d_model: dimension of the model
     :param length: length of positions
@@ -56,9 +61,9 @@ def positionalencoding1d(d_model, length):
     if d_model % 2 != 0:
         raise ValueError("Cannot use sin/cos positional encoding with "
                          "odd dim (got dim={:d})".format(d_model))
-    pe = torch.zeros(length, d_model)
-    position = torch.arange(0, length).unsqueeze(1)
-    div_term = torch.exp((torch.arange(0, d_model, 2, dtype=torch.float) *
+    pe = torch.zeros(length, d_model, device=device)
+    position = torch.arange(0, length, device=device).unsqueeze(1)
+    div_term = torch.exp((torch.arange(0, d_model, 2, dtype=torch.float, device=device) *
                           -(math.log(10000.0) / d_model)))
     pe[:, 0::2] = torch.sin(position.float() * div_term)
     pe[:, 1::2] = torch.cos(position.float() * div_term)
@@ -70,16 +75,14 @@ def time_encoding_sin(neighb, added_emb_dim=16):
     device = neighb.device
     if neighb.ndim == 4:
         bs, num_n, length, _ = neighb.shape
-        pe = positionalencoding1d(added_emb_dim, length).to(device)
+        pe = positionalencoding1d(added_emb_dim, length, device) #.to(device)
         pose_enc = pe.unsqueeze(0).unsqueeze(0).repeat(bs, num_n, 1, 1)
-        # print(pose_enc.shape)
         neighb = torch.cat((neighb, pose_enc), dim=-1)
         return neighb
     else:
         bs, length, _ = neighb.shape
-        pe = positionalencoding1d(added_emb_dim, length).to(device)
+        pe = positionalencoding1d(added_emb_dim, length, device) #.to(device)
         pose_enc = pe.unsqueeze(0).repeat(bs, 1, 1)
-        # print(pose_enc.shape)
         neighb = torch.cat((neighb, pose_enc), dim=-1)
         return neighb
 
@@ -136,8 +139,8 @@ class PoseAttention(nn.Module):
         self.pose_emb_dim = 16
         self.att = nn.MultiheadAttention(embed_dim + self.pose_emb_dim, num_heads, dropout=dr_rate)
         self.q_mlp = nn.Linear(embed_dim + self.pose_emb_dim, embed_dim + self.pose_emb_dim)
-        self.k_mlp = nn.Linear(embed_dim + 128, embed_dim + self.pose_emb_dim)
-        self.v_mlp = nn.Linear(embed_dim + 128, embed_dim + self.pose_emb_dim)
+        self.k_mlp = nn.Linear(embed_dim + 32, embed_dim + self.pose_emb_dim)
+        self.v_mlp = nn.Linear(embed_dim + 32, embed_dim + self.pose_emb_dim)
         self.silly_masking = True
         self.layer_norm = nn.LayerNorm(embed_dim + self.pose_emb_dim)
 
@@ -147,7 +150,7 @@ class PoseAttention(nn.Module):
         return agent_h
 
     def forward(self, x, agent_h):
-        agent_h_te = time_encoding_sin(agent_h, added_emb_dim=128)
+        agent_h_te = time_encoding_sin(agent_h, added_emb_dim=32)
         value = self.v_mlp(agent_h_te).permute(1, 0, 2)
         key = self.k_mlp(agent_h_te).permute(1, 0, 2)
 
@@ -165,7 +168,7 @@ class SelfAttention(nn.Module):
         self.att = nn.MultiheadAttention(embed_dim + 16, num_heads, dropout=dr_rate)
         self.encoder_layer = nn.TransformerEncoderLayer(d_model=embed_dim + 16, nhead=8)
         self.transformer_encoder = nn.TransformerEncoder(self.encoder_layer, num_layers=2)
-        self.q_mlp = nn.Linear(embed_dim + 16 + 128, embed_dim + 16)
+        self.q_mlp = nn.Linear(embed_dim + 16 + 32, embed_dim + 16)
         # self.k_mlp = nn.Linear(embed_dim + 16 + 128, embed_dim + 16)
         # self.v_mlp = nn.Linear(embed_dim + 16 + 128, embed_dim + 16)
         self.silly_masking = True
@@ -179,13 +182,9 @@ class SelfAttention(nn.Module):
     def forward(self, agent_h, agent_h_avail, masking=0):
         if masking:
             agent_h = self.masking(agent_h, agent_h_avail)
-        agent_h_te = time_encoding_sin(agent_h, added_emb_dim=128)
+        agent_h_te = time_encoding_sin(agent_h, added_emb_dim=32)
         src = self.q_mlp(agent_h_te).permute(1, 0, 2)
         out = self.transformer_encoder(src)
-        # key = self.k_mlp(agent_h_te).permute(1, 0, 2)
-        # query = self.q_mlp(agent_h_te).permute(1, 0, 2)
-        # out, _ = self.att(query, key, value)
-        # out = self.layer_norm(out)
         return out.permute(1, 0, 2)
 
 
@@ -238,8 +237,8 @@ class PoseEncoderBlock(nn.Module):
         if self.use_points:
             x = x + self.pa(points_emb, x)
 
-        x = x + self.sat(x, None)
-
+        # x = x + self.sat(x, None)
+        x = self.sat(x, None)
         return x
 
 
@@ -252,12 +251,12 @@ class Encoder(nn.Module):
 
     def forward(self, x, image_emb, agent_h_emb, points_emb):
         for pose_encoder in self.layers:
-            x = x + pose_encoder(x, image_emb, agent_h_emb, points_emb)
+            x = pose_encoder(x, image_emb, agent_h_emb, points_emb)
         return x
 
 
 class DecoderGoals(nn.Module):
-    def __init__(self, inp_dim=32, inp_hor=12, out_modes=20, out_dim=2 + 4 + 1, dr_rate=0.3):
+    def __init__(self, inp_dim=32, inp_hor=6, out_modes=20, out_dim=2, dr_rate=0.1, use_recurrent=False):
         super().__init__()
         self.out_modes, self.out_dim = out_modes, out_dim
         self.layers = nn.Sequential(
@@ -267,35 +266,22 @@ class DecoderGoals(nn.Module):
             nn.ReLU(),
             nn.Dropout(dr_rate),
             nn.LayerNorm(512),
-            nn.Linear(512, out_dim )
+            nn.Linear(512, out_dim)
         )
+        self.use_recurrent = use_recurrent
+        if self.use_recurrent:
+            self.rec = nn.GRU(inp_dim + 16, out_dim)
 
-    def pred_to_gmm(self, predictions):
-        bs = predictions.shape[0]
-        mean_predictions = predictions[:, :2 * self.out_modes].reshape(bs, self.out_modes, 2)
-        # cov_predictions = predictions[:, 2 * self.out_modes:2 * self.out_modes + 4 * self.out_modes].reshape(bs,
-        #                                                                                                      self.out_modes,
-        #                                                                                                      2, 2)
-        cov_predictions = 3 * torch.eye(2).unsqueeze(0).unsqueeze(0).repeat(bs, self.out_modes, 1, 1).to(
-            mean_predictions.device)
-        probs_predictions = predictions[:, -self.out_modes:]
 
-        probs_predictions = torch.sigmoid(probs_predictions)
-        mix = torch.distributions.Categorical(probs_predictions)
-
-        scale_tril = torch.tril(((cov_predictions ** 2) + 1e-6))
-        scale_tril[:, :, 1, 0] = cov_predictions[:, :, 1, 0]
-
-        distr = torch.distributions.multivariate_normal.MultivariateNormal(mean_predictions, scale_tril=scale_tril)
-
-        gmm = torch.distributions.MixtureSameFamily(mix, distr)
-        return gmm
 
     def forward(self, hist_enc):
         bs = hist_enc.shape[0]
-        predictions = self.layers(hist_enc).reshape(bs, -1)
-        gmm = self.pred_to_gmm(predictions)
-        return gmm, predictions
+        if not self.use_recurrent:
+            predictions = self.layers(hist_enc).reshape(bs, -1)
+        else:
+            predictions, (_) = self.rec(hist_enc)#.reshape(bs, -1)
+            # gmm = self.pred_to_gmm(predictions)
+        return  predictions
 
 
 class DecoderTraj(nn.Module):
@@ -328,7 +314,7 @@ class DecoderTraj(nn.Module):
 
 class DecoderTraj2(nn.Module):
 
-    def __init__(self, inp_dim=32, inp_hor=12, out_modes=1, out_dim=2, out_horiz=12, dr_rate=0.1):
+    def __init__(self, inp_dim=32, inp_hor=12, out_modes=1, out_dim=2, out_horiz=12, dr_rate=0.1, use_recurrent=False):
         super().__init__()
         self.out_modes, self.out_dim, self.out_horiz = out_modes, out_dim, out_horiz
         self.goal_embeder = nn.Sequential(nn.Linear(2, 8),
@@ -338,7 +324,7 @@ class DecoderTraj2(nn.Module):
         self.out_shape = out_shape
 
         self.outlayers = nn.Sequential(
-            nn.Linear(out_shape * 2 + 128, out_shape * 4),
+            nn.Linear(out_shape * 2 + 32, out_shape * 4),
             nn.ReLU(),
 
             nn.Linear(out_shape * 4, out_shape * 2),
@@ -349,29 +335,47 @@ class DecoderTraj2(nn.Module):
         )
         # self.att = nn.MultiheadAttention(out_shape * 2, out_modes, dropout=0.)
 
-        self.encoder_layer = nn.TransformerEncoderLayer(d_model=out_shape * 2 + 128, nhead=4)
+        self.encoder_layer = nn.TransformerEncoderLayer(d_model=out_shape * 2 + 32, nhead=4)
         self.transformer_encoder = nn.TransformerEncoder(self.encoder_layer, num_layers=2)
 
         self.q_mlp = nn.Linear(inp_dim + inp_dim//2 + 16, out_shape * 2)
         self.conf_mlp = nn.Sequential(nn.Linear(self.out_modes, self.out_modes), nn.ReLU(), nn.Linear(self.out_modes, self.out_modes))
+        self.use_recurrent = use_recurrent
+        if use_recurrent:
+            # self.rec = nn.GRU(out_shape * 2 + 128, out_dim * out_horiz + 1)
+            self.rec = nn.GRU(out_shape * 2 + 128, 321)
+            self.singl_mode = nn.GRU(4, 2)
 
     def forward(self, hist_enc, goal):
         bs = hist_enc.shape[0]
-        goal_embedded = self.goal_embeder(goal)
+        goal_embedded = self.goal_embeder(goal.reshape(bs, -1, 2))
         inp = torch.cat((hist_enc, goal_embedded), dim=2)
         inp_q = self.q_mlp(inp)
 
-        agent_h_te = time_encoding_sin(inp_q, added_emb_dim=128)
-        # src = self.q_mlp(agent_h_te).permute(1, 0, 2)
+        agent_h_te = time_encoding_sin(inp_q, added_emb_dim=32)
         predictions = self.transformer_encoder(agent_h_te.permute(1, 0, 2)).permute(1, 0, 2)
+        if self.use_recurrent:
+            out, (_) = self.rec(predictions)
 
-
+            confidences = torch.softmax(self.conf_mlp(out[:, :, -1]), dim=-1)
+            out = rearrange(out[:, :, :-1], "bs num_modes (time data) -> (bs num_modes) time data", time=80, data=4)
+            out, (_) = self.singl_mode(out)
+            out = rearrange(out, "(bs num_modes) time data -> bs num_modes time data", bs=bs, num_modes=hist_enc.shape[1])
+            trajectories = out.reshape(bs, self.out_modes,
+                                                 self.out_horiz,
+                                                 self.out_dim)
+            trajectories = trajectories.cumsum(2)
+            return trajectories, confidences
+        # inp_q = self.q_mlp(inp)
+        #
+        # agent_h_te = time_encoding_sin(inp_q, added_emb_dim=128)
+        # predictions = self.transformer_encoder(agent_h_te.permute(1, 0, 2)).permute(1, 0, 2)
         predictions = self.outlayers(predictions)
 
         confidences = torch.softmax(self.conf_mlp(predictions[:, -self.out_modes:, -1]), dim=-1)
         trajectories = predictions[:, -1, :self.out_shape - self.out_modes].reshape(bs, self.out_modes, self.out_horiz,
                                                                                     self.out_dim)
-
+        # trajectories = trajectories.cumsum(2)
         return trajectories, confidences
 
 
@@ -388,12 +392,13 @@ def gmm_means(gmm):
 
 
 def create_rot_matrix(state_masked):
-    cur_3d = torch.ones_like(state_masked[:, 0, :3])
+    cur_3d = torch.ones_like(state_masked[:, 0, :3], dtype=torch.float64)
     cur_3d[:, :2] = -state_masked[:, 0, :2].clone()
-    T = torch.eye(3).unsqueeze(0).repeat(cur_3d.shape[0], 1, 1).to(cur_3d.device)
+    T = torch.eye(3, dtype=torch.float64).unsqueeze(0).repeat(cur_3d.shape[0], 1, 1).to(cur_3d.device)
     T[:, :, 2] = cur_3d
-    angles = torch.atan2(state_masked[:, 0, 2], state_masked[:, 0, 3])
-    rot_mat = torch.eye(3).unsqueeze(0).repeat(cur_3d.shape[0], 1, 1).to(cur_3d.device)
+    angles = torch.atan2(state_masked[:, 0, 2].type(torch.float64),
+                         state_masked[:, 0, 3].type(torch.float64))
+    rot_mat = torch.eye(3, dtype=torch.float64).unsqueeze(0).repeat(cur_3d.shape[0], 1, 1).to(cur_3d.device)
     rot_mat[:, 0, 0] = torch.cos(angles)
     rot_mat[:, 1, 1] = torch.cos(angles)
     rot_mat[:, 0, 1] = -torch.sin(angles)
@@ -404,7 +409,7 @@ def create_rot_matrix(state_masked):
 
 class AttPredictorPecNet(nn.Module):
     def __init__(self, inp_dim=32, embed_dim=128, num_blocks=8, out_modes=1, out_dim=2, out_horiz=12,
-                 dr_rate=0.0, use_vis=True, use_points=True, use_map=True):
+                 dr_rate=0.0, use_vis=True, use_points=True, use_map=True, use_rec=False):
         super().__init__()
         self.use_gt_goals = False
         self.use_points = use_points
@@ -412,13 +417,15 @@ class AttPredictorPecNet(nn.Module):
             self.pointNet = PointNetfeat(global_feat=True)
         self.use_vis = use_vis
         if use_vis:
-            self.visual = timm.create_model('efficientnetv2_rw_t', pretrained=True)
-            self.visual.classifier = torch.nn.Identity()
+            self.rgb_loader = RgbLoader(index_path="rendered/train/index.pkl")
+            # self.visual = timm.create_model('efficientnetv2_rw_t', pretrained=True)
+            self.visual = timm.create_model('efficientnet_lite0', pretrained=True)
+            self.visual.classifier = torch.nn.Linear(self.visual.classifier.in_features, 1024)
         self.latent = nn.Parameter(torch.rand(out_modes, embed_dim + 16), requires_grad=True)
-        self.embeder = InitEmbedding(inp_dim=4, out_dim=embed_dim)
+        self.embeder = InitEmbedding(inp_dim=4, out_dim=embed_dim, use_recurrent=use_rec)
         self.encoder = Encoder(inp_dim, embed_dim, num_blocks, use_vis=use_vis, use_points=use_points, dr_rate=dr_rate)
-        self.decoder_goals = DecoderGoals(embed_dim, 12, out_modes, dr_rate=dr_rate)
-        self.decoder_trajs = DecoderTraj2(embed_dim, 12, out_modes, out_dim, out_horiz, dr_rate)
+        self.decoder_goals = DecoderGoals(embed_dim, 12, out_modes, dr_rate=dr_rate, use_recurrent=use_rec)
+        self.decoder_trajs = DecoderTraj2(embed_dim, 12, out_modes, out_dim, out_horiz, dr_rate, use_recurrent=use_rec)
 
     def forward(self, data):
         ### xyz emb
@@ -440,12 +447,17 @@ class AttPredictorPecNet(nn.Module):
         state = torch.cat([poses, velocities], dim=-1)
         state_masked = state.reshape(bs, 128, 11, -1)[masks]
         rot_mat = create_rot_matrix(state_masked)
-        rot_mat_inv = torch.inverse(rot_mat)
+        rot_mat_inv = torch.inverse(rot_mat).type(torch.float32)
         ### rotate cur state
         state_expanded = torch.cat([state_masked[:, :, :2], torch.ones_like(state_masked[:, :, :1])], -1)
-        state_masked[:, :, :2] = torch.bmm(rot_mat, state_expanded.permute(0, 2, 1)).permute(0, 2, 1)[:, :, :2]
-        # state_masked[:, :-1, 2:] *= 0
+        state_masked[:, :, :2] = torch.bmm(rot_mat, state_expanded.permute(0, 2, 1).type(torch.float64)).permute(0, 2, 1)[:, :, :2].type(torch.float32)
+        rot_mat = rot_mat.type(torch.float32)
+        assert ((np.linalg.norm(state_masked[:, 0, :2].cpu() - np.zeros_like(state_masked[:, 0, :2].cpu()),
+                                axis=1) < 1e-4).all())
+
         state_masked[:, :-1, 2:] = state_masked[:, :-1, :2] - state_masked[:, 1:, :2]
+        assert ((np.linalg.norm(state_masked[:, 0, 2:3].cpu() - np.zeros_like(state_masked[:, 0, 2:3].cpu()),
+                                axis=1) < 1e-4).all())
         agent_h_emb = self.embeder(state_masked)
         # pointnet embedder
         xyz_emb = None
@@ -464,42 +476,59 @@ class AttPredictorPecNet(nn.Module):
         ####
         img_emb = None
         if self.use_vis:
-            rasters = rasterize_batch(data, True)
-            maps = torch.tensor(np.concatenate(rasters)).permute(0, 3, 1, 2) / 255.
-            maps[:, 0] += maps[:, 3:].sum(1)
-            maps[:, 0] = maps[:, 0]/5
+
+            try:
+                rasters = self.rgb_loader.load_batch_rgb(data).astype(np.float32)
+                maps = torch.tensor(rasters).permute(0, 3, 1, 2) / 255.
+            except KeyError as e:
+                rasterized = rasterize_batch(data, True)
+                summed_cur = np.concatenate(rasterized)[:, :, :, 3:14].sum(-1)
+                summed_neigh = np.concatenate(rasterized)[:, :, :, 14:].sum(-1)
+                rgb = np.concatenate(rasterized)[:, :, :, :3]
+                rgb[:, :, :, 1] += -np.clip(summed_cur, 0, 200)
+                rgb[:, :, :, 1] = np.clip(rgb[:, :, :, 1], 0, 255)
+                rgb[:, :, :, 0] += -np.clip(summed_neigh, 0, 200)
+                rgb[:, :, :, 0] = np.clip(rgb[:, :, :, 0], 0, 255)
+                maps = torch.tensor(rgb).permute(0, 3, 1, 2) / 255.
+                maps[:, 0] += maps[:, 3:].sum(1)
+                maps[:, 0] = maps[:, 0] / 5
+                print(e)
+                # raise e
+
             maps = maps[:, :3].to(self.latent.device) #cuda()
             img_emb = self.visual(maps) #.to(self.latent.device).cuda()
         x = self.latent.unsqueeze(0).repeat(bsr, 1, 1)
         x = self.encoder(x, img_emb, agent_h_emb, xyz_emb)
-        gmm, goal_vector = self.decoder_goals(x)
-        # goals = gmm.mean
-        goals = gmm.component_distribution.mean.clone()
-        # gmm.component_distribution.mean
-        gmm.component_distribution.loc = torch.bmm(rot_mat_inv,
-                          torch.cat([gmm.component_distribution.loc, torch.ones_like(gmm.component_distribution.mean[:, :, :1])], -1).permute(0, 2, 1)).permute(0, 2, 1)[:,
-                :, :2]
-        gmm.component_distribution.loc -= rot_mat_inv[:, :2, 2].unsqueeze(1)
-
-        gt_goals = torch.cat([data["state/future/x"].reshape(-1, 128, 80, 1), data["state/future/y"].reshape(-1, 128, 80, 1)], -1)[data["state/tracks_to_predict"]>0][:, -1:].repeat(1, 6, 1)
-        gt_goals = torch.cat([gt_goals, torch.ones_like(gt_goals[:, :, :1])], -1).to(goals.device)
-        gt_goals = torch.bmm(rot_mat, gt_goals.permute(0, 2, 1)).permute(0, 2, 1)[:, :, :2]
+        goal_vector = self.decoder_goals(x)
+        # goals = goal_vector
 
         ## find where no final goal at timestamp 80
-        no_gt_future_indexes = data["state/future/valid"].reshape(-1,128,80)[data["state/tracks_to_predict"] > 0][:,-1] == 0
-        if self.use_gt_goals:
-            gt_goals[no_gt_future_indexes] = gmm.component_distribution.loc[no_gt_future_indexes]
-        else:
-            gt_goals = gmm.component_distribution.loc
-        predictions, confidences = self.decoder_trajs(x, gt_goals)
-        ps = predictions.shape
-        ## rotate goals back
-        goals = torch.bmm(rot_mat_inv,
-                          torch.cat([goals, torch.ones_like(goals[:, :, :1])], -1).permute(0, 2, 1)).permute(0, 2, 1)[:,
-                :, :2]
-        goals -= rot_mat_inv[:, :2, 2].unsqueeze(1)
 
-        return predictions.permute(0, 2, 1, 3), confidences, goals, goal_vector,  rot_mat, rot_mat_inv
+        if self.use_gt_goals:
+            gt_goals = \
+                torch.cat(
+                    [data["state/future/x"].reshape(-1, 128, 80, 1), data["state/future/y"].reshape(-1, 128, 80, 1)],
+                    -1)[
+                    data["state/tracks_to_predict"] > 0][:, -1:].repeat(1, 6, 1)
+            gt_goals = torch.cat([gt_goals, torch.ones_like(gt_goals[:, :, :1])], -1).to(goals.device)
+            gt_goals_local = torch.bmm(rot_mat, gt_goals.permute(0, 2, 1)).permute(0, 2, 1)[:, :, :2]
+
+            no_gt_future_indexes = data["state/future/valid"].reshape(-1, 128, 80)[data["state/tracks_to_predict"] > 0][
+                                   :, -1] == 0
+            gt_goals_local[no_gt_future_indexes] = goal_vector[no_gt_future_indexes]
+            predictions, confidences = self.decoder_trajs(x, gt_goals_local)
+        else:
+            predictions, confidences = self.decoder_trajs(x, goal_vector)
+
+
+        ## rotate goals back
+        # goals = torch.bmm(rot_mat_inv,
+        #                   torch.cat([goals.reshape(-1, 6, 2), torch.ones_like(goals.reshape(-1, 6, 2)[:, :, :1])],
+        #                             -1).permute(0, 2, 1)).permute(0, 2, 1)[:,
+        #         :, :2]
+        # goals -= rot_mat_inv[:, :2, 2].unsqueeze(1)
+
+        return predictions.permute(0, 2, 1, 3), confidences, goal_vector,  rot_mat, rot_mat_inv
 
 
 class CovNet(nn.Module):

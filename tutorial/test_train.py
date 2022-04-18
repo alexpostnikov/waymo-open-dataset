@@ -66,7 +66,7 @@ test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size,
 device = "cuda"
 
 net = AttPredictorPecNet(inp_dim=config.exp_inp_dim, embed_dim=config.exp_embed_dim, num_blocks=config.exp_num_blocks,
-                         out_modes=6, use_vis=config.exp_use_vis,
+                         out_modes=6, use_vis=config.exp_use_vis, use_rec=config.exp_use_rec,
                          use_points=config.exp_use_points, out_horiz=80//config.use_every_nth_prediction)
 net = torch.nn.DataParallel(net)
 
@@ -110,9 +110,23 @@ def overfit_test(model, loader, optimizer):
     im = vis_cur_and_fut(data, outputs)
     plt.imshow(im)
 
+def main():
+    train_multymodal(net, (train_loader, test_loader), optimizer, checkpointer=checkpointer,
+                     num_ep=wandb.config["epochs"],
+                     logger=wandb, use_every_nth_prediction=config.use_every_nth_prediction, scheduler=scheduler)
 
-train_multymodal(net, (train_loader, test_loader), optimizer, checkpointer=checkpointer, num_ep=wandb.config["epochs"],
-                 logger=wandb, use_every_nth_prediction=config.use_every_nth_prediction, scheduler=scheduler)
 
-print("done")
-print("done")
+if __name__ == "__main__":
+    main()
+    # import cProfile, pstats
+    # data = next(iter(train_loader))
+    # profiler = cProfile.Profile()
+    # profiler.enable()
+    # for i in tqdm(range(20)):
+    #     net(data)
+    # # main()
+    # profiler.disable()
+    # cProfile.run('')
+    # stats = pstats.Stats(profiler)
+    # stats.dump_stats('here')
+    #

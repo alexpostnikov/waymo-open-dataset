@@ -153,8 +153,7 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
     pbar = tqdm(train_loader)
     for chank, data in enumerate(pbar):
         optimizer.zero_grad()
-        poses, confs, goals, goal_vector, rot_mat, rot_mat_inv = model(data)
-        gmm = goal_vector_to_gmm(goal_vector, rot_mat_inv)
+        poses, confs, goals_local, rot_mat, rot_mat_inv = model(data)
         mask = data["state/tracks_to_predict"]
         valid = data["state/future/valid"].reshape(-1, 128, 80)[mask > 0].to(poses.device)[:,
                 use_every_nth_prediction - 1::use_every_nth_prediction]
@@ -163,11 +162,10 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
         fut_ext = torch.cat([fut_path, torch.ones_like(fut_path[:, :, :1])], -1)
         fut_path = torch.bmm(rot_mat, fut_ext.permute(0, 2, 1)).permute(0, 2, 1)[:,
                    use_every_nth_prediction - 1::use_every_nth_prediction, :2]
-        goal_nll = -gmm.log_prob(fut_path[:, -1])[valid[:, -1] > 0]
 
         m_ades = (torch.norm((fut_path.unsqueeze(2) - poses), dim=-1) * valid.unsqueeze(2)).mean(1).min(
             -1).values.mean()
-        m_fdes = (torch.norm((fut_path[:, -1].unsqueeze(1) - poses[:, -1]), dim=-1) * valid[:, -1].unsqueeze(1)).min(
+        m_fdes = (torch.norm((fut_path[:, -1].unsqueeze(1) - goals_local.reshape(-1,6,2)), dim=-1) * valid[:, -1].unsqueeze(1)).min(
             -1).values
         m_fdes = m_fdes[m_fdes > 0]
         if len(m_fdes) > 0:
@@ -177,9 +175,11 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
         fut_path_masked = fut_path.unsqueeze(2) * valid.unsqueeze(2).unsqueeze(2)
         pred_masked = poses * valid.unsqueeze(2).unsqueeze(2)
         loss_nll = -log_likelihood(fut_path_masked, pred_masked, confs).mean()
+        goals_masked = (valid.unsqueeze(2).unsqueeze(2)[:,-1] * goals_local.reshape(-1,6,2))
+        loss_goals = -log_likelihood(fut_path_masked[:,  -1:], goals_masked.unsqueeze(1), confs).mean()
         m_ade = m_ades.mean()
 
-        loss = 0.01 * m_ade + 1 * loss_nll + 1 * goal_nll.mean() + 0.001 * m_fde
+        loss = 0.01 * m_ade + 1 * loss_nll + 1 * loss_goals
         loss.backward()
 
         optimizer.step()
@@ -200,7 +200,7 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
             logger.log({"loss": loss_nll,
                         "min_ade": m_ade.item(),
                         "min_fde": m_fde.item(),
-                        "goal_nll": goal_nll.mean().item(),
+                        #"goal_nll": goal_nll.mean().item(),
                         "LR": my_lr[0]})
             if len(losses) > 500:
                 losses = losses[100:]
