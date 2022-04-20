@@ -118,11 +118,12 @@ def train(model, loader, optimizer, num_ep=10):
 
 
 def train_multymodal(model, loaders, optimizer, num_ep=10, checkpointer=None, logger=None,
-                     use_every_nth_prediction=1, scheduler=None):
+                     use_every_nth_prediction=1, scheduler=None, rgb_loader=None):
     train_loader, test_loader = loaders
     for epoch in range(num_ep):  # loop over the dataset multiple times
         model.train()
-        train_losses = train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_prediction, scheduler)
+        train_losses = train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_prediction,
+                                   scheduler, rgb_loader)
         # test_losses = test_epoch(epoch, logger, model, test_loader)
         checkpointer.save(epoch, train_losses.mean().item())
 
@@ -146,13 +147,16 @@ def goal_vector_to_gmm(predictions, rot_mat_inv, out_modes=6):
     return gmm
 
 
-def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_prediction=1, scheduler=None):
+def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_prediction=1,
+                scheduler=None, rgb_loader=None):
     losses = torch.rand(0)
     mades = torch.rand(0)
     mfdes = torch.rand(0)
     pbar = tqdm(train_loader)
     for chank, data in enumerate(pbar):
         optimizer.zero_grad()
+        if rgb_loader is not None:
+            data["rgbs"] = rgb_loader.load_batch_rgb(data, prefix="").astype(np.float32)
         poses, confs, goals_local, rot_mat, rot_mat_inv = model(data)
         mask = data["state/tracks_to_predict"]
         valid = data["state/future/valid"].reshape(-1, 128, 80)[mask > 0].to(poses.device)[:,

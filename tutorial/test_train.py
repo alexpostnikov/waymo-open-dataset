@@ -17,6 +17,7 @@ from scripts.train import get_speed_ade_with_mask, get_ade_from_pred_speed_with_
 from scripts.config import build_parser
 from scripts.models import Checkpointer
 from scripts.dataloaders import context_description, CustomImageDataset, d_collate_fn
+from scripts.rgb_loader import  RgbLoader
 
 tf.get_logger().setLevel('ERROR')
 
@@ -114,9 +115,11 @@ def overfit_test(model, loader, optimizer):
     plt.imshow(im)
 
 def main():
+    rgb_loader = RgbLoader(config.train_index_path)
     train_multymodal(net, (train_loader, test_loader), optimizer, checkpointer=checkpointer,
                      num_ep=wandb.config["epochs"],
-                     logger=wandb, use_every_nth_prediction=config.use_every_nth_prediction, scheduler=scheduler)
+                     logger=wandb, use_every_nth_prediction=config.use_every_nth_prediction, scheduler=scheduler,
+                     rgb_loader=rgb_loader)
 
 
 if __name__ == "__main__":

@@ -24,6 +24,10 @@ def build_parser():
         '--dir_data', type=str, default='/media/robot/hdd/waymo_dataset/tf_example',
         help='Directory where SDC data is stored. We also use this to cache '
              'torch hub models.')
+    parser.add_argument(
+        '--train_index_path', type=str, default='./rendered/train/index.pkl',
+        help='Directory where SDC data is stored. We also use this to cache '
+             'torch hub models.')
 
     parser.add_argument(
         '--dir_checkpoint', type=str, default="./checkpoints/",

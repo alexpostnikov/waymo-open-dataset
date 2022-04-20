@@ -479,23 +479,23 @@ class AttPredictorPecNet(nn.Module):
         if self.use_vis:
 
             try:
-                rasters = self.rgb_loader.load_batch_rgb(data, prefix="").astype(np.float32)
-                maps = torch.tensor(rasters).permute(0, 3, 1, 2) / 255.
+                # rasters = self.rgb_loader.load_batch_rgb(data, prefix="").astype(np.float32)
+                maps = torch.tensor(data["rgbs"]).permute(0, 3, 1, 2) / 255.
             except KeyError as e:
                 raise e
                 # return [None]
-                rasterized = rasterize_batch(data, True)
-                summed_cur = np.concatenate(rasterized)[:, :, :, 3:14].sum(-1)
-                summed_neigh = np.concatenate(rasterized)[:, :, :, 14:].sum(-1)
-                rgb = np.concatenate(rasterized)[:, :, :, :3]
-                rgb[:, :, :, 1] += -np.clip(summed_cur, 0, 200)
-                rgb[:, :, :, 1] = np.clip(rgb[:, :, :, 1], 0, 255)
-                rgb[:, :, :, 0] += -np.clip(summed_neigh, 0, 200)
-                rgb[:, :, :, 0] = np.clip(rgb[:, :, :, 0], 0, 255)
-                maps = torch.tensor(rgb).permute(0, 3, 1, 2) / 255.
-                maps[:, 0] += maps[:, 3:].sum(1)
-                maps[:, 0] = maps[:, 0] / 5
-                print("error:", e)
+                # rasterized = rasterize_batch(data, True)
+                # summed_cur = np.concatenate(rasterized)[:, :, :, 3:14].sum(-1)
+                # summed_neigh = np.concatenate(rasterized)[:, :, :, 14:].sum(-1)
+                # rgb = np.concatenate(rasterized)[:, :, :, :3]
+                # rgb[:, :, :, 1] += -np.clip(summed_cur, 0, 200)
+                # rgb[:, :, :, 1] = np.clip(rgb[:, :, :, 1], 0, 255)
+                # rgb[:, :, :, 0] += -np.clip(summed_neigh, 0, 200)
+                # rgb[:, :, :, 0] = np.clip(rgb[:, :, :, 0], 0, 255)
+                # maps = torch.tensor(rgb).permute(0, 3, 1, 2) / 255.
+                # maps[:, 0] += maps[:, 3:].sum(1)
+                # maps[:, 0] = maps[:, 0] / 5
+                # print("error:", e)
                 
 
             maps = maps[:, :3].to(self.latent.device) #cuda()

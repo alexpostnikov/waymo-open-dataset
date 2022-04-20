@@ -8,6 +8,7 @@ import torch.utils
 from tfrecord.torch import TFRecordDataset
 import numpy as np
 import re
+
 np_str_obj_array_pattern = re.compile(r'[SaUO]')
 string_classes = (str, bytes)
 
@@ -160,8 +161,8 @@ context_description = {
 
 
 class CustomImageDataset(torch.utils.data.IterableDataset):
-    def __init__(self, tf_dir, context_desription, transform=None, target_transform=None, ):
-        # self.tf_dir = tf_dir
+    def __init__(self, tf_dir, context_desription, transform=None, target_transform=None):
+
         self.context_desription = context_desription
 
         self.tf_files = glob.glob(tf_dir)
@@ -170,6 +171,8 @@ class CustomImageDataset(torch.utils.data.IterableDataset):
         self.transform = transform
         self.target_transform = target_transform
         self.cur_file_index = 0
+
+
 
     def __iter__(self):
         self.dataset = TFRecordDataset(self.tf_files[0], index_path=None, description=self.context_desription)
