@@ -72,7 +72,7 @@ device = "cuda"
 net = AttPredictorPecNet(inp_dim=config.exp_inp_dim, embed_dim=config.exp_embed_dim, num_blocks=config.exp_num_blocks,
                          out_modes=6, use_vis=config.exp_use_vis, use_rec=config.exp_use_rec,
                          use_points=config.exp_use_points, out_horiz=80//config.use_every_nth_prediction)
-# net = torch.nn.DataParallel(net)
+net = torch.nn.DataParallel(net)
 
 
 optimizer = optim.Adam(net.parameters(), lr=wandb.config["learning_rate"])

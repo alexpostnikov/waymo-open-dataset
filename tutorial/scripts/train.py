@@ -158,7 +158,7 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
         if rgb_loader is not None:
             data["rgbs"] = torch.tensor(rgb_loader.load_batch_rgb(data, prefix="").astype(np.float32))
 
-        batch_unpacked = preprocess_batch(data, model.use_points, model.use_vis)
+        batch_unpacked = preprocess_batch(data, model.module.use_points, model.module.use_vis)
 
         poses, confs, goals_local, rot_mat, rot_mat_inv = model(batch_unpacked)
         mask = data["state/tracks_to_predict"]
