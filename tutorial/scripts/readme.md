@@ -2,10 +2,12 @@
 
 ```bash
 pip install gsutil
-pip install gcloud
-
+#pip install gcloud
+snap install google-cloud-cli --classic
 gcloud auth login
+gsutil config
 ```
+
 goto [waymo files](https://console.cloud.google.com/storage/browser/waymo_open_dataset_motion_v_1_1_0;tab=objects?prefix=&forceOnObjectsSortingFiltering=false) page
 find folder\file to download, e.g. :
 ```
