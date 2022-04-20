@@ -156,8 +156,11 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
     for chank, data in enumerate(pbar):
         optimizer.zero_grad()
         if rgb_loader is not None:
-            data["rgbs"] = rgb_loader.load_batch_rgb(data, prefix="").astype(np.float32)
-        poses, confs, goals_local, rot_mat, rot_mat_inv = model(data)
+            data["rgbs"] = torch.tensor(rgb_loader.load_batch_rgb(data, prefix="").astype(np.float32))
+
+        batch_unpacked = preprocess_batch(data, model.use_points, model.use_vis)
+
+        poses, confs, goals_local, rot_mat, rot_mat_inv = model(batch_unpacked)
         mask = data["state/tracks_to_predict"]
         valid = data["state/future/valid"].reshape(-1, 128, 80)[mask > 0].to(poses.device)[:,
                 use_every_nth_prediction - 1::use_every_nth_prediction]
@@ -442,3 +445,68 @@ def pytorch_neg_multi_log_likelihood_batch(data, logits, confidences, use_every_
     error = -torch.logsumexp(error, dim=-1, keepdim=True)
 
     return torch.mean(error)
+
+
+def preprocess_batch(data, use_points=False, use_vis=False):
+        bs = data["roadgraph_samples/xyz"].shape[0]
+        masks = data["state/tracks_to_predict"].reshape(-1, 128) > 0
+        bsr = masks.sum()  # num peds to predict, bs real
+        # positional embedder
+        cur = torch.cat(
+            [data["state/current/x"].reshape(-1, 128, 1, 1), data["state/current/y"].reshape(-1, 128, 1, 1)], -1)
+        past = torch.cat([data["state/past/x"].reshape(-1, 128, 10, 1), data["state/past/y"].reshape(-1, 128, 10, 1)],
+                         -1)  # .permute(0, 2, 1, 3)
+        poses = torch.cat([cur, torch.flip(past, dims=[2])], dim=2).reshape(bs * 128, 11, -1).cuda()
+        velocities = torch.zeros_like(poses)
+        velocities[:, :-1] = poses[:, :-1] - poses[:, 1:]
+        state = torch.cat([poses, velocities], dim=-1)
+        state_masked = state.reshape(bs, 128, 11, -1)[masks]
+        rot_mat = create_rot_matrix(state_masked)
+        rot_mat_inv = torch.inverse(rot_mat).type(torch.float32)
+        ### rotate cur state
+        state_expanded = torch.cat([state_masked[:, :, :2], torch.ones_like(state_masked[:, :, :1])], -1)
+        state_masked[:, :, :2] = torch.bmm(rot_mat, state_expanded.permute(0, 2, 1).type(torch.float64)).permute(0, 2,
+                                                                                                                 1)[:,
+                                 :, :2].type(torch.float32)
+        rot_mat = rot_mat.type(torch.float32)
+        assert ((np.linalg.norm(state_masked[:, 0, :2].cpu() - np.zeros_like(state_masked[:, 0, :2].cpu()),
+                                axis=1) < 1e-4).all())
+        state_masked[:, :-1, 2:] = state_masked[:, :-1, :2] - state_masked[:, 1:, :2]
+        assert ((np.linalg.norm(state_masked[:, 0, 2:3].cpu() - np.zeros_like(state_masked[:, 0, 2:3].cpu()),
+                                axis=1) < 1e-4).all())
+
+        xyz_personal, maps = None, None
+        if use_points:
+            xyz = data["roadgraph_samples/xyz"].reshape(bs, -1, 3)[:, ::2].cuda()
+            xyz_personal = torch.zeros([0, xyz.shape[1], xyz.shape[2]], device=xyz.device)
+            ## rotate pointclouds
+            # ...
+            for i, index in enumerate(masks.nonzero()):
+                xyz_p = torch.ones([xyz.shape[1], xyz.shape[2]], device=xyz.device)
+                xyz_p[:, :2] = xyz[index[0], :, :2].clone()
+                xyz_p = (rot_mat[i] @ xyz_p.T).T
+                xyz_personal = torch.cat((xyz_personal, xyz_p.unsqueeze(0)), dim=0)
+        if use_vis:
+            try:
+                # rasters = self.rgb_loader.load_batch_rgb(data, prefix="").astype(np.float32)
+                maps = torch.tensor(data["rgbs"]).permute(0, 3, 1, 2) / 255.
+            except KeyError as e:
+                raise e
+        return bs, bsr, masks, rot_mat, rot_mat_inv, state_masked, xyz_personal, maps
+
+
+def create_rot_matrix(state_masked):
+    cur_3d = torch.ones_like(state_masked[:, 0, :3], dtype=torch.float64)
+    cur_3d[:, :2] = -state_masked[:, 0, :2].clone()
+    T = torch.eye(3, dtype=torch.float64).unsqueeze(0).repeat(cur_3d.shape[0], 1, 1).to(cur_3d.device)
+    T[:, :, 2] = cur_3d
+    angles = torch.atan2(state_masked[:, 0, 2].type(torch.float64),
+                         state_masked[:, 0, 3].type(torch.float64))
+    rot_mat = torch.eye(3, dtype=torch.float64).unsqueeze(0).repeat(cur_3d.shape[0], 1, 1).to(cur_3d.device)
+    rot_mat[:, 0, 0] = torch.cos(angles)
+    rot_mat[:, 1, 1] = torch.cos(angles)
+    rot_mat[:, 0, 1] = -torch.sin(angles)
+    rot_mat[:, 1, 0] = torch.sin(angles)
+    transform = rot_mat @ T
+    return transform
+

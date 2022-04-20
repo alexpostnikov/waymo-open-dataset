@@ -392,21 +392,6 @@ def gmm_means(gmm):
     return gmm.component_distribution.loc
 
 
-def create_rot_matrix(state_masked):
-    cur_3d = torch.ones_like(state_masked[:, 0, :3], dtype=torch.float64)
-    cur_3d[:, :2] = -state_masked[:, 0, :2].clone()
-    T = torch.eye(3, dtype=torch.float64).unsqueeze(0).repeat(cur_3d.shape[0], 1, 1).to(cur_3d.device)
-    T[:, :, 2] = cur_3d
-    angles = torch.atan2(state_masked[:, 0, 2].type(torch.float64),
-                         state_masked[:, 0, 3].type(torch.float64))
-    rot_mat = torch.eye(3, dtype=torch.float64).unsqueeze(0).repeat(cur_3d.shape[0], 1, 1).to(cur_3d.device)
-    rot_mat[:, 0, 0] = torch.cos(angles)
-    rot_mat[:, 1, 1] = torch.cos(angles)
-    rot_mat[:, 0, 1] = -torch.sin(angles)
-    rot_mat[:, 1, 0] = torch.sin(angles)
-    transform = rot_mat @ T
-    return transform
-
 
 class AttPredictorPecNet(nn.Module):
     def __init__(self, inp_dim=32, embed_dim=128, num_blocks=8, out_modes=1, out_dim=2, out_horiz=12,
@@ -428,108 +413,23 @@ class AttPredictorPecNet(nn.Module):
         self.decoder_goals = DecoderGoals(embed_dim, 12, out_modes, dr_rate=dr_rate, use_recurrent=use_rec)
         self.decoder_trajs = DecoderTraj2(embed_dim, 12, out_modes, out_dim, out_horiz, dr_rate, use_recurrent=use_rec)
 
-    def forward(self, data):
-        ### xyz emb
-        bs = data["roadgraph_samples/xyz"].shape[0]
-        masks = data["state/tracks_to_predict"].reshape(-1, 128) > 0
-        bsr = masks.sum()  # num peds to predict, bs real
-
-        # positional embedder
-
-        cur = torch.cat(
-            [data["state/current/x"].reshape(-1, 128, 1, 1), data["state/current/y"].reshape(-1, 128, 1, 1)], -1)
-
-        past = torch.cat([data["state/past/x"].reshape(-1, 128, 10, 1), data["state/past/y"].reshape(-1, 128, 10, 1)],
-                         -1)  # .permute(0, 2, 1, 3)
-
-        poses = torch.cat([cur, torch.flip(past, dims=[2])], dim=2).reshape(bs * 128, 11, -1).cuda()
-        velocities = torch.zeros_like(poses)
-        velocities[:, :-1] = poses[:, :-1] - poses[:, 1:]
-        state = torch.cat([poses, velocities], dim=-1)
-        state_masked = state.reshape(bs, 128, 11, -1)[masks]
-        rot_mat = create_rot_matrix(state_masked)
-        rot_mat_inv = torch.inverse(rot_mat).type(torch.float32)
-        ### rotate cur state
-        state_expanded = torch.cat([state_masked[:, :, :2], torch.ones_like(state_masked[:, :, :1])], -1)
-        state_masked[:, :, :2] = torch.bmm(rot_mat, state_expanded.permute(0, 2, 1).type(torch.float64)).permute(0, 2, 1)[:, :, :2].type(torch.float32)
-        rot_mat = rot_mat.type(torch.float32)
-        assert ((np.linalg.norm(state_masked[:, 0, :2].cpu() - np.zeros_like(state_masked[:, 0, :2].cpu()),
-                                axis=1) < 1e-4).all())
-
-        state_masked[:, :-1, 2:] = state_masked[:, :-1, :2] - state_masked[:, 1:, :2]
-        assert ((np.linalg.norm(state_masked[:, 0, 2:3].cpu() - np.zeros_like(state_masked[:, 0, 2:3].cpu()),
-                                axis=1) < 1e-4).all())
+    def forward(self, batch_unpacked):
+        ## xyz emb
+        bs, bsr, masks, rot_mat, rot_mat_inv, state_masked, xyz_personal, maps = batch_unpacked
         agent_h_emb = self.embeder(state_masked)
         # pointnet embedder
         xyz_emb = None
         if self.use_points:
-            xyz = data["roadgraph_samples/xyz"].reshape(bs, -1, 3)[:, ::2].cuda()
-            xyz_personal = torch.zeros([0, xyz.shape[1], xyz.shape[2]], device=xyz.device)
-            ## rotate pointclouds
-            # ...
-            for i, index in enumerate(masks.nonzero()):
-                xyz_p = torch.ones([xyz.shape[1], xyz.shape[2]], device=xyz.device)
-                xyz_p[:, :2] = xyz[index[0], :, :2].clone()
-                xyz_p = (rot_mat[i] @ xyz_p.T).T
-                xyz_personal = torch.cat((xyz_personal, xyz_p.unsqueeze(0)), dim=0)
             xyz_emb, _, _ = self.pointNet(xyz_personal.permute(0, 2, 1))
-        # xyz_emb = xyz_emb.repeat(8, 1)
-        ####
+
         img_emb = None
         if self.use_vis:
-
-            try:
-                # rasters = self.rgb_loader.load_batch_rgb(data, prefix="").astype(np.float32)
-                maps = torch.tensor(data["rgbs"]).permute(0, 3, 1, 2) / 255.
-            except KeyError as e:
-                raise e
-                # return [None]
-                # rasterized = rasterize_batch(data, True)
-                # summed_cur = np.concatenate(rasterized)[:, :, :, 3:14].sum(-1)
-                # summed_neigh = np.concatenate(rasterized)[:, :, :, 14:].sum(-1)
-                # rgb = np.concatenate(rasterized)[:, :, :, :3]
-                # rgb[:, :, :, 1] += -np.clip(summed_cur, 0, 200)
-                # rgb[:, :, :, 1] = np.clip(rgb[:, :, :, 1], 0, 255)
-                # rgb[:, :, :, 0] += -np.clip(summed_neigh, 0, 200)
-                # rgb[:, :, :, 0] = np.clip(rgb[:, :, :, 0], 0, 255)
-                # maps = torch.tensor(rgb).permute(0, 3, 1, 2) / 255.
-                # maps[:, 0] += maps[:, 3:].sum(1)
-                # maps[:, 0] = maps[:, 0] / 5
-                # print("error:", e)
-                
-
             maps = maps[:, :3].to(self.latent.device) #cuda()
             img_emb = self.visual(maps) #.to(self.latent.device).cuda()
         x = self.latent.unsqueeze(0).repeat(bsr, 1, 1)
         x = self.encoder(x, img_emb, agent_h_emb, xyz_emb)
         goal_vector = self.decoder_goals(x)
-        # goals = goal_vector
-
-        ## find where no final goal at timestamp 80
-
-        if self.use_gt_goals:
-            gt_goals = \
-                torch.cat(
-                    [data["state/future/x"].reshape(-1, 128, 80, 1), data["state/future/y"].reshape(-1, 128, 80, 1)],
-                    -1)[
-                    data["state/tracks_to_predict"] > 0][:, -1:].repeat(1, 6, 1)
-            gt_goals = torch.cat([gt_goals, torch.ones_like(gt_goals[:, :, :1])], -1).to(goals.device)
-            gt_goals_local = torch.bmm(rot_mat, gt_goals.permute(0, 2, 1)).permute(0, 2, 1)[:, :, :2]
-
-            no_gt_future_indexes = data["state/future/valid"].reshape(-1, 128, 80)[data["state/tracks_to_predict"] > 0][
-                                   :, -1] == 0
-            gt_goals_local[no_gt_future_indexes] = goal_vector[no_gt_future_indexes]
-            predictions, confidences = self.decoder_trajs(x, gt_goals_local)
-        else:
-            predictions, confidences = self.decoder_trajs(x, goal_vector)
-
-
-        ## rotate goals back
-        # goals = torch.bmm(rot_mat_inv,
-        #                   torch.cat([goals.reshape(-1, 6, 2), torch.ones_like(goals.reshape(-1, 6, 2)[:, :, :1])],
-        #                             -1).permute(0, 2, 1)).permute(0, 2, 1)[:,
-        #         :, :2]
-        # goals -= rot_mat_inv[:, :2, 2].unsqueeze(1)
+        predictions, confidences = self.decoder_trajs(x, goal_vector)
 
         return predictions.permute(0, 2, 1, 3), confidences, goal_vector,  rot_mat, rot_mat_inv
 
