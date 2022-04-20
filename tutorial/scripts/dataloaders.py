@@ -6,7 +6,7 @@ import tensorflow as tf
 import torch
 import torch.utils
 from tfrecord.torch import TFRecordDataset
-
+import numpy as np
 import re
 np_str_obj_array_pattern = re.compile(r'[SaUO]')
 string_classes = (str, bytes)
@@ -221,8 +221,10 @@ def d_collate_fn(batch):
                 # array of string classes and object
                 if np_str_obj_array_pattern.search(elem.dtype.str) is not None:
                     raise #TypeError(default_collate_err_msg_format.format(elem.dtype))
-
-                return d_collate_fn([torch.as_tensor(b) for b in batch])
+                if batch[0].flags["WRITEABLE"]:
+                    return d_collate_fn([torch.as_tensor(b) for b in batch])
+                else:
+                    return d_collate_fn([torch.as_tensor(np.copy(b)) for b in batch])
             elif elem.shape == ():  # scalars
                 return torch.as_tensor(batch)
         elif isinstance(elem, float):
