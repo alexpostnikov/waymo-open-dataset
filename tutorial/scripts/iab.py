@@ -206,6 +206,7 @@ class VisualAttentionTransformer(nn.Module):
         return agent_h
 
     def forward(self, resnet_out, agent_h, masking=0):
+        # print(self.v_mlp.in_features, resnet_out.shape)
         value = self.v_mlp(resnet_out).unsqueeze(1).permute(1, 0, 2)
         key = self.k_mlp(resnet_out).unsqueeze(1).permute(1, 0, 2)
         query = self.q_mlp(agent_h).permute(1, 0, 2)
@@ -478,9 +479,11 @@ class AttPredictorPecNet(nn.Module):
         if self.use_vis:
 
             try:
-                rasters = self.rgb_loader.load_batch_rgb(data).astype(np.float32)
+                rasters = self.rgb_loader.load_batch_rgb(data, prefix="").astype(np.float32)
                 maps = torch.tensor(rasters).permute(0, 3, 1, 2) / 255.
             except KeyError as e:
+                raise e
+                # return [None]
                 rasterized = rasterize_batch(data, True)
                 summed_cur = np.concatenate(rasterized)[:, :, :, 3:14].sum(-1)
                 summed_neigh = np.concatenate(rasterized)[:, :, :, 14:].sum(-1)
@@ -492,8 +495,8 @@ class AttPredictorPecNet(nn.Module):
                 maps = torch.tensor(rgb).permute(0, 3, 1, 2) / 255.
                 maps[:, 0] += maps[:, 3:].sum(1)
                 maps[:, 0] = maps[:, 0] / 5
-                print(e)
-                # raise e
+                print("error:", e)
+                
 
             maps = maps[:, :3].to(self.latent.device) #cuda()
             img_emb = self.visual(maps) #.to(self.latent.device).cuda()
