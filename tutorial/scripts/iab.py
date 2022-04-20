@@ -415,7 +415,8 @@ class AttPredictorPecNet(nn.Module):
 
     def forward(self, batch_unpacked):
         ## xyz emb
-        bs, bsr, masks, rot_mat, rot_mat_inv, state_masked, xyz_personal, maps = batch_unpacked
+        masks, rot_mat, rot_mat_inv, state_masked, xyz_personal, maps = batch_unpacked
+        bsr = state_masked.shape[0]
         agent_h_emb = self.embeder(state_masked)
         # pointnet embedder
         xyz_emb = None

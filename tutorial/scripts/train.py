@@ -475,7 +475,7 @@ def preprocess_batch(data, use_points=False, use_vis=False):
         assert ((np.linalg.norm(state_masked[:, 0, 2:3].cpu() - np.zeros_like(state_masked[:, 0, 2:3].cpu()),
                                 axis=1) < 1e-4).all())
 
-        xyz_personal, maps = None, None
+        xyz_personal, maps = torch.rand(bsr), torch.rand(bsr)
         if use_points:
             xyz = data["roadgraph_samples/xyz"].reshape(bs, -1, 3)[:, ::2].cuda()
             xyz_personal = torch.zeros([0, xyz.shape[1], xyz.shape[2]], device=xyz.device)
@@ -492,7 +492,7 @@ def preprocess_batch(data, use_points=False, use_vis=False):
                 maps = torch.tensor(data["rgbs"]).permute(0, 3, 1, 2) / 255.
             except KeyError as e:
                 raise e
-        return bs, bsr, masks, rot_mat, rot_mat_inv, state_masked, xyz_personal, maps
+        return masks, rot_mat, rot_mat_inv, state_masked, xyz_personal, maps
 
 
 def create_rot_matrix(state_masked):
