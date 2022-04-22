@@ -157,7 +157,7 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
         optimizer.zero_grad()
         if rgb_loader is not None:
             data["rgbs"] = torch.tensor(rgb_loader.load_batch_rgb(data, prefix="").astype(np.float32))
-
+        
         batch_unpacked = preprocess_batch(data, model.module.use_points, model.module.use_vis)
 
         poses, confs, goals_local, rot_mat, rot_mat_inv = model(batch_unpacked)
@@ -212,11 +212,11 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
             if len(losses) > 500:
                 losses = losses[100:]
 
-        if (chank % 200) == 0:
-            poses = apply_tr(poses, rot_mat_inv)
-            image = vis_cur_and_fut(data, poses.detach().cpu(), confs=confs.detach().cpu())
-            images = wandb.Image(image, caption="Top: Output, Bottom: Input")
-            wandb.log({"examples": images})
+        # if (chank % 200) == 0:
+        #     poses = apply_tr(poses, rot_mat_inv)
+        #     image = vis_cur_and_fut(data, poses.detach().cpu(), confs=confs.detach().cpu())
+        #     images = wandb.Image(image, caption="Top: Output, Bottom: Input")
+        #     wandb.log({"examples": images})
     return losses
 
 
@@ -448,7 +448,7 @@ def pytorch_neg_multi_log_likelihood_batch(data, logits, confidences, use_every_
 
 
 def preprocess_batch(data, use_points=False, use_vis=False):
-        bs = data["roadgraph_samples/xyz"].shape[0]
+        bs = data["state/tracks_to_predict"].shape[0]
         masks = data["state/tracks_to_predict"].reshape(-1, 128) > 0
         bsr = masks.sum()  # num peds to predict, bs real
         # positional embedder
