@@ -32,6 +32,7 @@ import wandb
 import random
 import torch.optim as optim
 from transformers import get_cosine_with_hard_restarts_schedule_with_warmup
+# torch.backends.cudnn.benchmark = True
 
 parser = build_parser()
 config = parser.parse_args()
@@ -94,7 +95,7 @@ def overfit_test(model, loader, optimizer):
     data = next(iter(pbar))
     pbar = tqdm(range(200))
     for chank in pbar:
-        optimizer.zero_grad()
+        optimizer.zero_grad(set_to_none=True)
         outputs = model(data)
 
         loss = get_ade_from_pred_speed_with_mask(data, outputs).mean()
@@ -115,6 +116,7 @@ def overfit_test(model, loader, optimizer):
     plt.imshow(im)
 
 def main():
+    
     rgb_loader = RgbLoader(config.train_index_path)
     train_multymodal(net, (train_loader, test_loader), optimizer, checkpointer=checkpointer,
                      num_ep=wandb.config["epochs"],
@@ -123,6 +125,7 @@ def main():
 
 
 if __name__ == "__main__":
+    
     main()
     # import cProfile, pstats
     # data = next(iter(train_loader))
