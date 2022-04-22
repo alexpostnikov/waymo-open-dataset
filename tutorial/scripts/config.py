@@ -30,7 +30,16 @@ def build_parser():
              'torch hub models.')
 
     parser.add_argument(
+        '--test_index_path', type=str, default='./rendered/val/index.pkl',
+        help='Directory where SDC data is stored. We also use this to cache '
+             'torch hub models.')
+
+    parser.add_argument(
         '--dir_checkpoint', type=str, default="./checkpoints/",
+        help='Directory to which model checkpoints are stored.')
+
+    parser.add_argument(
+        '--subm_file_path', type=str, default="out.pb",
         help='Directory to which model checkpoints are stored.')
 
     ###########################################################################

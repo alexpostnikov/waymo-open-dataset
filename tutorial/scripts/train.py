@@ -9,14 +9,8 @@ from waymo_open_dataset.protos import motion_submission_pb2
 
 
 # from test_train import get_ade_from_pred_speed_with_mask, get_speed_ade_with_mask
-def create_subm(model, loader):
-    try:
-        model.load_state_dict(
-            torch.load("/home/jovyan/waymo-open-dataset/checkpoints/model-seed-0-epoch-1.pt", map_location="cuda"))
-    except:
-        print("fake subm!!!")
-        print("fake subm!!!")
-        print("fake subm!!!")
+def create_subm(model, loader, rgb_loader=None, out_file="file.pb"):
+
     motion_challenge_submission = motion_submission_pb2.MotionChallengeSubmission()
 
     motion_challenge_submission.account_name = "alex.postnikov@skolkovotech.ru"
@@ -33,6 +27,8 @@ def create_subm(model, loader):
     with torch.no_grad():
         pbar = tqdm(loader, total=int(22000 * 128 // 479 * 150 // loader.batch_size))
         for chank, data in enumerate(pbar):
+            if rgb_loader is not None:
+                data["rgbs"] = torch.tensor(rgb_loader.load_batch_rgb(data, prefix="").astype(np.float32))
             logits, confidences, goals, goal_vector, rot_mat, rot_mat_inv = model(data)
             logits = apply_tr(logits, rot_mat_inv)
             logits = logits.cpu().numpy()
@@ -87,7 +83,7 @@ def create_subm(model, loader):
                     trajectory.center_x.extend(p[:, 0])
                     trajectory.center_y.extend(p[:, 1])
 
-        with open("file.pb", "wb") as f:
+        with open(out_file, "wb") as f:
             f.write(motion_challenge_submission.SerializeToString())
         return
 
