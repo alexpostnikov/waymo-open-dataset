@@ -8,6 +8,7 @@ from scripts.rgb_loader import RgbLoader
 import timm
 import numpy as np
 from einops import rearrange
+import torchvision.models as models
 
 def get_n_params(model):
     pp = 0
@@ -405,8 +406,12 @@ class AttPredictorPecNet(nn.Module):
         if use_vis:
             self.rgb_loader = RgbLoader(index_path="rendered/train/index.pkl")
             # self.visual = timm.create_model('efficientnetv2_rw_t', pretrained=True)
-            self.visual = timm.create_model('efficientnet_lite0', pretrained=True)
-            self.visual.classifier = torch.nn.Linear(self.visual.classifier.in_features, 1024)
+            # self.visual = timm.create_model('efficientnet_lite0', pretrained=True)
+            # self.visual.classifier = torch.nn.Linear(self.visual.classifier.in_features, 1024)
+            # self.visual = models.mobilenet_v3_small(pretrained=True)
+            # self.visual.classifier = self.visual.classifier[0]
+            self.visual = models.resnet18(pretrained=True)
+            self.visual.fc = torch.nn.Linear(512, 1024)
         self.latent = nn.Parameter(torch.rand(out_modes, embed_dim + 16), requires_grad=True)
         self.embeder = InitEmbedding(inp_dim=4, out_dim=embed_dim, use_recurrent=use_rec)
         self.encoder = Encoder(inp_dim, embed_dim, num_blocks, use_vis=use_vis, use_points=use_points, dr_rate=dr_rate)
