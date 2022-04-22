@@ -79,7 +79,7 @@ class RgbLoader():
         # logging.info(f'----load_batch_rgb() names = {names}')
         files = [self.index_dict[name] for name in names]
         file_name_index = self.namefile_to_file_name_index(names, files)
-        batch_rgb = np.random.rand(len(aids), 224, 224, 3)
+        batch_rgb = np.ones((len(aids), 224, 224, 3), dtype=np.float32)
         for file, name_index in file_name_index.items():
             indexes = [ni[1] for ni in name_index]
             # logging.info(f' --------load_batch_rgb() name_index = {name_index}, prefix= {prefix}')
