@@ -49,8 +49,8 @@ class InitEmbedding(nn.Module):
         agent_h = self.masking(agent_h, agent_h_avail)
         out = self.layers(agent_h)
         if self.use_recurrent:
-            out, (_) = self.rec(out)  # = nn.GRU(out_dim, out_dim)
-        return out
+            out, (_) = self.rec(out.permute(1,0,2))
+        return out.permute(1,0,2)
 
 
 def positionalencoding1d(d_model, length, device="cuda"):
@@ -281,9 +281,9 @@ class DecoderGoals(nn.Module):
         if not self.use_recurrent:
             predictions = self.layers(hist_enc).reshape(bs, -1)
         else:
-            predictions, (_) = self.rec(hist_enc)#.reshape(bs, -1)
-            # gmm = self.pred_to_gmm(predictions)
-        return  predictions
+            predictions, (_) = self.rec(hist_enc.permute(1,0,2))  #.reshape(bs, -1)
+            # predictions shape is (seq_len, bs, out_dim)
+        return  predictions.permute(1,0,2)
 
 
 class DecoderTraj(nn.Module):
@@ -345,7 +345,7 @@ class DecoderTraj2(nn.Module):
         self.use_recurrent = use_recurrent
         if use_recurrent:
             # self.rec = nn.GRU(out_shape * 2 + 128, out_dim * out_horiz + 1)
-            self.rec = nn.GRU(out_shape * 2 + 128, 321)
+            self.rec = nn.GRU(out_shape * 2 + 32, 321)
             self.singl_mode = nn.GRU(4, 2)
 
     def forward(self, hist_enc, goal):
@@ -357,7 +357,8 @@ class DecoderTraj2(nn.Module):
         agent_h_te = time_encoding_sin(inp_q, added_emb_dim=32)
         predictions = self.transformer_encoder(agent_h_te.permute(1, 0, 2)).permute(1, 0, 2)
         if self.use_recurrent:
-            out, (_) = self.rec(predictions)
+            out, (_) = self.rec(predictions.permute(1, 0, 2))
+            out = out.permute(1, 0, 2)
 
             confidences = torch.softmax(self.conf_mlp(out[:, :, -1]), dim=-1)
             out = rearrange(out[:, :, :-1], "bs num_modes (time data) -> (bs num_modes) time data", time=80, data=4)
@@ -368,10 +369,7 @@ class DecoderTraj2(nn.Module):
                                                  self.out_dim)
             trajectories = trajectories.cumsum(2)
             return trajectories, confidences
-        # inp_q = self.q_mlp(inp)
-        #
-        # agent_h_te = time_encoding_sin(inp_q, added_emb_dim=128)
-        # predictions = self.transformer_encoder(agent_h_te.permute(1, 0, 2)).permute(1, 0, 2)
+
         predictions = self.outlayers(predictions)
 
         confidences = torch.softmax(self.conf_mlp(predictions[:, -self.out_modes:, -1]), dim=-1)
