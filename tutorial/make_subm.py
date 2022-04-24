@@ -1,9 +1,3 @@
-# Data location. Please edit.
-
-# A tfrecord containing tf.Example protos as downloaded from the Waymo dataset
-# webpage.
-
-# Replace this path with your own tfrecords.
 import sys
 from pathlib import Path
 
@@ -33,36 +27,19 @@ import random
 import torch.optim as optim
 from transformers import get_cosine_with_hard_restarts_schedule_with_warmup
 
-# torch.backends.cudnn.benchmark = True
-
 parser = build_parser()
 config = parser.parse_args()
 random.seed(config.np_seed)
 torch.manual_seed(config.torch_seed)
 np.random.seed(config.np_seed)
 
-# Example field definition
-
-# Features of other agents.
-
-# from pathlib import Path
 import os
 
-wandb.init(project="waymo22", entity="aleksey-postnikov", name=config.exp_name)
-wandb.config = {
-    "learning_rate": config.exp_lr,
-    "epochs": config.exp_num_epochs,
-    "batch_size": config.exp_batch_size
-}
 
 batch_size = config.exp_batch_size
 
-train_tfrecord_path = os.path.join(config.dir_data, "training/training_tfexample.*-of-01000")
 test_path = os.path.join(config.dir_data, "validation/validation_tfexample.tfrecord-*-of-00150")
-train_dataset = CustomImageDataset(train_tfrecord_path, context_description)
 test_dataset = CustomImageDataset(test_path, context_description)
-train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size,
-                                           num_workers=config.exp_num_workers, collate_fn=d_collate_fn)
 test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size,
                                           num_workers=config.exp_num_workers, collate_fn=d_collate_fn)
 
@@ -73,12 +50,6 @@ net = AttPredictorPecNet(inp_dim=config.exp_inp_dim, embed_dim=config.exp_embed_
                          use_points=config.exp_use_points, out_horiz=80 // config.use_every_nth_prediction)
 net = torch.nn.DataParallel(net)
 
-optimizer = optim.Adam(net.parameters(), lr=wandb.config["learning_rate"])
-scheduler = get_cosine_with_hard_restarts_schedule_with_warmup(
-    optimizer=optimizer,
-    num_warmup_steps=20,
-    num_training_steps=(22000 * 128 / config.exp_batch_size) * wandb.config["epochs"],
-    num_cycles=wandb.config["epochs"])
 net = net.to(device)
 
 checkpointer = Checkpointer(model=net, torch_seed=0, ckpt_dir=config.dir_checkpoint, checkpoint_frequency=1)
@@ -115,12 +86,13 @@ def overfit_test(model, loader, optimizer):
 def main():
     try:
         net.load_state_dict(
-            torch.load("/home/jovyan/waymo-open-dataset/checkpoints/model-seed-0-epoch-1.pt", map_location="cuda"))
+            torch.load("/home/jovyan/waymo-open-dataset/tutorial/checkpoints/model-seed-0-epoch-6.pt", map_location="cuda"))
+        print("model loaded")
     except:
         print("fake subm!!!")
         print("fake subm!!!")
         print("fake subm!!!")
-    rgb_loader = RgbLoader(config.train_index_path)
+    rgb_loader = RgbLoader(config.test_index_path)
     create_subm(net, test_loader, rgb_loader, out_file=config.subm_file_path)
 
 
