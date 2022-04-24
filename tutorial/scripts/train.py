@@ -21,7 +21,6 @@ def create_subm(model, loader, rgb_loader=None, out_file="file.pb"):
     )
     motion_challenge_submission.unique_method_name = "iab"
     model.eval()
-    # model.use_gt_goals = False
     model.module.use_gt_goals = False
     RES = {}
     with torch.no_grad():
@@ -29,7 +28,10 @@ def create_subm(model, loader, rgb_loader=None, out_file="file.pb"):
         for chank, data in enumerate(pbar):
             if rgb_loader is not None:
                 data["rgbs"] = torch.tensor(rgb_loader.load_batch_rgb(data, prefix="").astype(np.float32))
-            logits, confidences, goals, goal_vector, rot_mat, rot_mat_inv = model(data)
+            
+            batch_unpacked = preprocess_batch(data, model.module.use_points, model.module.use_vis)
+            logits, confidences, goals, rot_mat, rot_mat_inv = model(batch_unpacked)
+            # logits, confidences, goals, goal_vector, rot_mat, rot_mat_inv = model(data)
             logits = apply_tr(logits, rot_mat_inv)
             logits = logits.cpu().numpy()
             confidences = confidences.cpu().numpy()
@@ -43,9 +45,7 @@ def create_subm(model, loader, rgb_loader=None, out_file="file.pb"):
             scenarios_id = []
             for bn, scenario in enumerate(scenario_id):
                 [scenarios_id.append(scenario) for i in range((mask.nonzero()[:, 0] == bn).sum())]
-            # next(iter(test_loader))["scenario/id"][0].numpy().tobytes().decode("utf-8")
-            # center = center.cpu().numpy()
-            # yaw = yaw.cpu().numpy()
+
             for p, conf, aid, sid in zip(
                     logits, confidences, agent_id, scenarios_id,
             ):
