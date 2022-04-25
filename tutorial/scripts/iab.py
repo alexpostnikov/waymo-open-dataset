@@ -50,7 +50,8 @@ class InitEmbedding(nn.Module):
         out = self.layers(agent_h)
         if self.use_recurrent:
             out, (_) = self.rec(out.permute(1,0,2))
-        return out.permute(1,0,2)
+            out = out.permute(1,0,2) 
+        return out
 
 
 def positionalencoding1d(d_model, length, device="cuda"):
@@ -283,7 +284,8 @@ class DecoderGoals(nn.Module):
         else:
             predictions, (_) = self.rec(hist_enc.permute(1,0,2))  #.reshape(bs, -1)
             # predictions shape is (seq_len, bs, out_dim)
-        return  predictions.permute(1,0,2)
+            predictions = predictions.permute(1,0,2)
+        return  predictions
 
 
 class DecoderTraj(nn.Module):
