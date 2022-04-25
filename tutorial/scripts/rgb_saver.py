@@ -2,7 +2,7 @@ from scripts.rasterization import rasterize_batch
 from tqdm import tqdm
 import numpy as np
 from six.moves import cPickle as pickle
-
+import glob
 
 def save_dict(di_, filename_):
     with open(filename_, 'ab') as f:
@@ -75,13 +75,16 @@ class RgbRenderer:
             pickle.dump(di_, f)
 
     def save_dataset(self, train_loader, index_file_name=None, rgb_file_name_base=None, ):
+        
+
         if index_file_name is None:
             index_file_name = self.index_path
         if rgb_file_name_base is None:
             rgb_file_name_base = self.rgb_file_name_base
 
-        rgb_file_name_index = 0
-
+        
+        rgb_file_name_index = len(glob.glob(self.rgb_file_name_base+"*"))
+        print(f" staring index {rgb_file_name_index}")
         rgb_holder = {}
 
         index_dict = {}
