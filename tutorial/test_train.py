@@ -113,7 +113,10 @@ net = checkpointer.load(config.epoch_to_load)
 
 
 def main():
-    rgb_loader = RgbLoader(config.train_index_path)
+    if config.exp_use_vis:
+        rgb_loader = RgbLoader(config.train_index_path)
+    else:
+        rgb_loader = None
     train_multymodal(net, (train_loader, test_loader), optimizer, checkpointer=checkpointer,
                      num_ep=wandb.config["epochs"],
                      logger=wandb, use_every_nth_prediction=config.use_every_nth_prediction, scheduler=scheduler,
