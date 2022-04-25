@@ -3,19 +3,15 @@ from tqdm.auto import tqdm
 import torch.nn as nn
 import numpy as np
 from einops import rearrange
-from scripts.visualize import vis_cur_and_fut
-import wandb
 from waymo_open_dataset.protos import motion_submission_pb2
 
 
-# from test_train import get_ade_from_pred_speed_with_mask, get_speed_ade_with_mask
 def create_subm(model, loader, rgb_loader=None, out_file="file.pb"):
 
     motion_challenge_submission = motion_submission_pb2.MotionChallengeSubmission()
 
     motion_challenge_submission.account_name = "alex.postnikov@skolkovotech.ru"
-    authors = "postnikov,gamaynov"
-    # motion_challenge_submission.authors.extend(authors.split(","))
+
     motion_challenge_submission.submission_type = (
         motion_submission_pb2.MotionChallengeSubmission.SubmissionType.MOTION_PREDICTION
     )
@@ -43,9 +39,6 @@ def create_subm(model, loader, rgb_loader=None, out_file="file.pb"):
             scenarios_id = []
             for bn, scenario in enumerate(scenario_id):
                 [scenarios_id.append(scenario) for i in range((mask.nonzero()[:, 0] == bn).sum())]
-            # next(iter(test_loader))["scenario/id"][0].numpy().tobytes().decode("utf-8")
-            # center = center.cpu().numpy()
-            # yaw = yaw.cpu().numpy()
             for p, conf, aid, sid in zip(
                     logits, confidences, agent_id, scenarios_id,
             ):
@@ -66,19 +59,13 @@ def create_subm(model, loader, rgb_loader=None, out_file="file.pb"):
                 predictions = prediction_set.predictions.add()
                 predictions.object_id = int(d["aid"])
 
-                # y = d["yaw"]
-                # rot_matrix = np.array([
-                #     [np.cos(y), -np.sin(y)],
-                #     [np.sin(y), np.cos(y)],
-                # ])
-
                 for i in np.argsort(-d["conf"]):
                     scored_trajectory = predictions.trajectories.add()
                     scored_trajectory.confidence = d["conf"][i]
 
                     trajectory = scored_trajectory.trajectory
 
-                    p = d["pred"][selector, i]  # @ rot_matrix + d["center"]
+                    p = d["pred"][selector, i]
 
                     trajectory.center_x.extend(p[:, 0])
                     trajectory.center_y.extend(p[:, 1])
@@ -198,21 +185,14 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
             mfdes = torch.cat([mfdes, torch.tensor([m_fde.detach().item()])], 0)
             pbar.set_description("ep %s chank %s" % (epoch, chank))
             pbar.set_postfix({"loss": losses.mean().item(), "m_ade": mades.mean().item(), 'fde': mfdes.mean().item()
-                              # "predicted": (mask[:, :, ::use_every_nth_prediction].sum(2)/poses.shape[2]).sum().item()
                               })
             logger.log({"loss": loss_nll,
                         "min_ade": m_ade.item(),
                         "min_fde": m_fde.item(),
-                        #"goal_nll": goal_nll.mean().item(),
                         "LR": my_lr[0]})
             if len(losses) > 500:
                 losses = losses[100:]
 
-        # if (chank % 200) == 0:
-        #     poses = apply_tr(poses, rot_mat_inv)
-        #     image = vis_cur_and_fut(data, poses.detach().cpu(), confs=confs.detach().cpu())
-        #     images = wandb.Image(image, caption="Top: Output, Bottom: Input")
-        #     wandb.log({"examples": images})
     return losses
 
 

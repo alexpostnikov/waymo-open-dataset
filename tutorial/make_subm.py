@@ -84,34 +84,6 @@ net = net.to(device)
 checkpointer = Checkpointer(model=net, torch_seed=0, ckpt_dir=config.dir_checkpoint, checkpoint_frequency=1)
 net = checkpointer.load(config.epoch_to_load)
 
-
-def overfit_test(model, loader, optimizer):
-    losses = torch.rand(0)
-    pbar = tqdm(loader)
-    data = next(iter(pbar))
-    pbar = tqdm(range(200))
-    for chank in pbar:
-        optimizer.zero_grad(set_to_none=True)
-        outputs = model(data)
-
-        loss = get_ade_from_pred_speed_with_mask(data, outputs).mean()
-        loss.backward()
-        optimizer.step()
-        with torch.no_grad():
-            speed_ade = get_speed_ade_with_mask(data, outputs.clone())
-            lin_ade = get_ade_from_pred_speed_with_mask(data, outputs.clone())
-            losses = torch.cat([losses, torch.tensor([loss.detach().item()])], 0)
-            pbar.set_description("ep %s chank %s" % (0, chank))
-            pbar.set_postfix({"loss": losses.mean().item(),
-                              "median": speed_ade.median().item(),
-                              "max": speed_ade.max().item(),
-                              "lin_ade": lin_ade.mean().item()})
-            if len(losses) > 500:
-                losses = losses[100:]
-    im = vis_cur_and_fut(data, outputs)
-    plt.imshow(im)
-
-
 def main():
     try:
         net.load_state_dict(
