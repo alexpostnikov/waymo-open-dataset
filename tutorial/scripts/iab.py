@@ -346,7 +346,7 @@ class DecoderTraj2(nn.Module):
 
         self.q_mlp = nn.Linear(inp_dim + inp_dim//2 + 16, out_shape * 2)
 
-        self.conf_mlp = nn.Sequential(nn.Linear(out_shape*self.out_modes, self.out_modes), nn.ReLU(),
+        self.conf_mlp = nn.Sequential(nn.Linear(self.out_modes, self.out_modes), nn.ReLU(),
                                       nn.Linear(self.out_modes, self.out_modes))
         self.use_recurrent = use_recurrent
 #         if use_recurrent:
@@ -381,7 +381,7 @@ class DecoderTraj2(nn.Module):
 
         predictions = self.outlayers(predictions)
 
-        confidences = torch.softmax(self.conf_mlp(predictions.reshape(bs, -1)), dim=-1)
+        confidences = torch.softmax(self.conf_mlp(predictions[:,:,-1].reshape(bs, -1)), dim=-1)
         trajectories = predictions[:, -1, :self.out_shape - self.out_modes].reshape(bs, self.out_modes, self.out_horiz,
                                                                                     self.out_dim)
         # trajectories = trajectories.cumsum(2)

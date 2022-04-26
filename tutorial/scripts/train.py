@@ -468,7 +468,7 @@ def preprocess_batch(data, use_points=False, use_vis=False):
         if use_vis:
             try:
                 # rasters = self.rgb_loader.load_batch_rgb(data, prefix="").astype(np.float32)
-                maps = torch.tensor(data["rgbs"]).permute(0, 3, 1, 2) / 255.
+                maps = data["rgbs"].permute(0, 3, 1, 2) / 255.
             except KeyError as e:
                 raise e
         return masks, rot_mat, rot_mat_inv, state_masked, xyz_personal, maps
