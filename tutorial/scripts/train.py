@@ -440,7 +440,7 @@ def preprocess_batch(data, use_points=False, use_vis=False):
         velocities[:, :-1] = poses[:, :-1] - poses[:, 1:]
         state = torch.cat([poses, velocities], dim=-1)
         state_masked = state.reshape(bs, 128, 11, -1)[masks]
-        rot_mat = create_rot_matrix(state_masked)
+        rot_mat = create_rot_matrix(state_masked, data["state/current/bbox_yaw"][masks])
         rot_mat_inv = torch.inverse(rot_mat).type(torch.float32)
         ### rotate cur state
         state_expanded = torch.cat([state_masked[:, :, :2], torch.ones_like(state_masked[:, :, :1])], -1)
@@ -474,13 +474,12 @@ def preprocess_batch(data, use_points=False, use_vis=False):
         return masks, rot_mat, rot_mat_inv, state_masked, xyz_personal, maps
 
 
-def create_rot_matrix(state_masked):
+def create_rot_matrix(state_masked, bbox_yaw=None):
     cur_3d = torch.ones_like(state_masked[:, 0, :3], dtype=torch.float64)
     cur_3d[:, :2] = -state_masked[:, 0, :2].clone()
     T = torch.eye(3, dtype=torch.float64).unsqueeze(0).repeat(cur_3d.shape[0], 1, 1).to(cur_3d.device)
     T[:, :, 2] = cur_3d
-    angles = torch.atan2(state_masked[:, 0, 2].type(torch.float64),
-                         state_masked[:, 0, 3].type(torch.float64))
+    angles = bbox_yaw - np.pi / 2
     rot_mat = torch.eye(3, dtype=torch.float64).unsqueeze(0).repeat(cur_3d.shape[0], 1, 1).to(cur_3d.device)
     rot_mat[:, 0, 0] = torch.cos(angles)
     rot_mat[:, 1, 1] = torch.cos(angles)
