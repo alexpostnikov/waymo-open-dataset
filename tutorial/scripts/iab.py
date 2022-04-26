@@ -280,12 +280,13 @@ class DecoderGoals(nn.Module):
     def forward(self, hist_enc):
         bs = hist_enc.shape[0]
         if self.use_recurrent:
-            hist_enc, (_) = self.rec(hist_enc.permute(1, 0, 2))  # .reshape(bs, -1)
+            hist_enc_rec, (_) = self.rec(hist_enc.permute(1, 0, 2))  # .reshape(bs, -1)
             # predictions shape is (seq_len, bs, out_dim)
-            hist_enc = hist_enc.permute(1, 0, 2)
+            hist_enc_rec = hist_enc_rec.permute(1, 0, 2)
 
-        predictions = self.layers(hist_enc).reshape(bs, -1)
-
+            predictions = self.layers(hist_enc_rec).reshape(bs, -1)
+        else:
+            predictions = self.layers(hist_enc).reshape(bs, -1)
         return predictions
 
 
@@ -348,12 +349,12 @@ class DecoderTraj2(nn.Module):
         self.conf_mlp = nn.Sequential(nn.Linear(out_shape*self.out_modes, self.out_modes), nn.ReLU(),
                                       nn.Linear(self.out_modes, self.out_modes))
         self.use_recurrent = use_recurrent
-        if use_recurrent:
-            self.conf_mlp = nn.Sequential(nn.Linear(out_shape - self.out_modes, self.out_modes), nn.ReLU(),
-                                          nn.Linear(self.out_modes, self.out_modes))
+#         if use_recurrent:
+#             self.conf_mlp = nn.Sequential(nn.Linear(out_shape - self.out_modes, self.out_modes), nn.ReLU(),
+#                                           nn.Linear(self.out_modes, self.out_modes))
 
-            self.rec = nn.GRU(out_shape * 2 + 32, out_dim * out_horiz)
-            self.singl_mode = nn.GRU(2, 2)
+#             self.rec = nn.GRU(out_shape * 2 + 32, out_dim * out_horiz)
+#             self.singl_mode = nn.GRU(2, 2)
 
     def forward(self, hist_enc, goal):
         bs = hist_enc.shape[0]
@@ -363,20 +364,20 @@ class DecoderTraj2(nn.Module):
 
         agent_h_te = time_encoding_sin(inp_q, added_emb_dim=32)
         predictions = self.transformer_encoder(agent_h_te.permute(1, 0, 2)).permute(1, 0, 2)
-        if self.use_recurrent:
-            out, (_) = self.rec(predictions.permute(1, 0, 2))
-            out = out.permute(1, 0, 2)
+#         if self.use_recurrent:
+#             out, (_) = self.rec(predictions.permute(1, 0, 2))
+#             out = out.permute(1, 0, 2)
 
-            confidences = torch.softmax(self.conf_mlp(out.reshape(bs, -1)), dim=-1)
-            out = rearrange(out, "bs num_modes (time data) -> (bs num_modes) time data", time=80, data=2)
-            out, (_) = self.singl_mode(out.permute(1, 0, 2))
-            out = out.permute(1, 0, 2)
-            out = rearrange(out, "(bs num_modes) time data -> bs num_modes time data", bs=bs, num_modes=hist_enc.shape[1])
-            trajectories = out.reshape(bs, self.out_modes,
-                                                 self.out_horiz,
-                                                 self.out_dim)
-            trajectories = trajectories.cumsum(2)
-            return trajectories, confidences
+#             confidences = torch.softmax(self.conf_mlp(out.reshape(bs, -1)), dim=-1)
+#             out = rearrange(out, "bs num_modes (time data) -> (bs num_modes) time data", time=80, data=2)
+#             out, (_) = self.singl_mode(out.permute(1, 0, 2))
+#             out = out.permute(1, 0, 2)
+#             out = rearrange(out, "(bs num_modes) time data -> bs num_modes time data", bs=bs, num_modes=hist_enc.shape[1])
+#             trajectories = out.reshape(bs, self.out_modes,
+#                                                  self.out_horiz,
+#                                                  self.out_dim)
+#             # trajectories = trajectories.cumsum(2)
+#             return trajectories, confidences
 
         predictions = self.outlayers(predictions)
 
