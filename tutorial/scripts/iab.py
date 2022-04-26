@@ -412,15 +412,50 @@ class AttPredictorPecNet(nn.Module):
         self.use_vis = use_vis
         if use_vis:
             self.rgb_loader = RgbLoader(index_path="rendered/train/index.pkl")
-            # self.visual = timm.create_model('efficientnetv2_rw_t', pretrained=True)
-            # self.visual = timm.create_model('efficientnet_lite0', pretrained=True)
-            # self.visual.classifier = torch.nn.Linear(self.visual.classifier.in_features, 1024)
-            # self.visual = models.mobilenet_v3_small(pretrained=True)
-            # self.visual.classifier = self.visual.classifier[0]
             self.visual = models.resnet18(pretrained=True)
             self.visual.fc = torch.nn.Linear(512, 1024)
         self.latent = nn.Parameter(torch.rand(out_modes, embed_dim + 16), requires_grad=True)
         self.embeder = InitEmbedding(inp_dim=4, out_dim=embed_dim, use_recurrent=use_rec)
+        self.encoder = Encoder(inp_dim, embed_dim, num_blocks, use_vis=use_vis, use_points=use_points, dr_rate=dr_rate)
+        self.decoder_goals = DecoderGoals(embed_dim, 12, out_modes, dr_rate=dr_rate, use_recurrent=use_rec)
+        self.decoder_trajs = DecoderTraj2(embed_dim, 12, out_modes, out_dim, out_horiz, dr_rate, use_recurrent=use_rec)
+
+    def forward(self, batch_unpacked):
+        ## xyz emb
+        masks, rot_mat, rot_mat_inv, state_masked, xyz_personal, maps = batch_unpacked
+        bsr = state_masked.shape[0]
+        agent_h_emb = self.embeder(state_masked)
+        # pointnet embedder
+        xyz_emb = None
+        if self.use_points:
+            xyz_emb, _, _ = self.pointNet(xyz_personal.permute(0, 2, 1))
+
+        img_emb = None
+        if self.use_vis:
+            maps = maps[:, :3].to(self.latent.device) #cuda()
+            img_emb = self.visual(maps) #.to(self.latent.device).cuda()
+        x = self.latent.unsqueeze(0).repeat(bsr, 1, 1)
+        x = self.encoder(x, img_emb, agent_h_emb, xyz_emb)
+        goal_vector = self.decoder_goals(x)
+        predictions, confidences = self.decoder_trajs(x, goal_vector)
+
+        return predictions.permute(0, 2, 1, 3), confidences, goal_vector,  rot_mat, rot_mat_inv
+
+class AttPredictorPecNetWithType(nn.Module):
+    def __init__(self, inp_dim=32, embed_dim=128, num_blocks=8, out_modes=1, out_dim=2, out_horiz=12,
+                 dr_rate=0.0, use_vis=True, use_points=True, use_map=True, use_rec=False):
+        super().__init__()
+        self.use_gt_goals = False
+        self.use_points = use_points
+        if use_points:
+            self.pointNet = PointNetfeat(global_feat=True)
+        self.use_vis = use_vis
+        if use_vis:
+            self.rgb_loader = RgbLoader(index_path="rendered/train/index.pkl")
+            self.visual = models.resnet18(pretrained=True)
+            self.visual.fc = torch.nn.Linear(512, 1024)
+        self.latent = nn.Parameter(torch.rand(out_modes, embed_dim + 16), requires_grad=True)
+        self.embeder = InitEmbedding(inp_dim=5, out_dim=embed_dim, use_recurrent=use_rec)
         self.encoder = Encoder(inp_dim, embed_dim, num_blocks, use_vis=use_vis, use_points=use_points, dr_rate=dr_rate)
         self.decoder_goals = DecoderGoals(embed_dim, 12, out_modes, dr_rate=dr_rate, use_recurrent=use_rec)
         self.decoder_trajs = DecoderTraj2(embed_dim, 12, out_modes, out_dim, out_horiz, dr_rate, use_recurrent=use_rec)

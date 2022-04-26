@@ -433,6 +433,7 @@ def preprocess_batch(data, use_points=False, use_vis=False):
         # positional embedder
         cur = torch.cat(
             [data["state/current/x"].reshape(-1, 128, 1, 1), data["state/current/y"].reshape(-1, 128, 1, 1)], -1)
+        agent_type = data["state/type"].reshape(-1, 128, 1, 1).repeat(1, 1, 11, 1)
         past = torch.cat([data["state/past/x"].reshape(-1, 128, 10, 1), data["state/past/y"].reshape(-1, 128, 10, 1)],
                          -1)  # .permute(0, 2, 1, 3)
         poses = torch.cat([cur, torch.flip(past, dims=[2])], dim=2).reshape(bs * 128, 11, -1).cuda()
@@ -451,8 +452,8 @@ def preprocess_batch(data, use_points=False, use_vis=False):
         assert ((np.linalg.norm(state_masked[:, 0, :2].cpu() - np.zeros_like(state_masked[:, 0, :2].cpu()),
                                 axis=1) < 1e-4).all())
         state_masked[:, :-1, 2:] = state_masked[:, :-1, :2] - state_masked[:, 1:, :2]
-        assert ((np.linalg.norm(state_masked[:, 0, 2:3].cpu() - np.zeros_like(state_masked[:, 0, 2:3].cpu()),
-                                axis=1) < 1e-4).all())
+        # assert ((np.linalg.norm(state_masked[:, 0, 2:3].cpu() - np.zeros_like(state_masked[:, 0, 2:3].cpu()),
+        #                         axis=1) < 0.1).all())
 
         xyz_personal, maps = torch.rand(bsr), torch.rand(bsr)
         if use_points:
@@ -471,6 +472,8 @@ def preprocess_batch(data, use_points=False, use_vis=False):
                 maps = data["rgbs"].permute(0, 3, 1, 2) / 255.
             except KeyError as e:
                 raise e
+        # cat state and type
+        state_masked = torch.cat([state_masked, agent_type[masks].to(state_masked.device)], dim=-1)
         return masks, rot_mat, rot_mat_inv, state_masked, xyz_personal, maps
 
 
@@ -479,7 +482,9 @@ def create_rot_matrix(state_masked, bbox_yaw=None):
     cur_3d[:, :2] = -state_masked[:, 0, :2].clone()
     T = torch.eye(3, dtype=torch.float64).unsqueeze(0).repeat(cur_3d.shape[0], 1, 1).to(cur_3d.device)
     T[:, :, 2] = cur_3d
-    angles = bbox_yaw - np.pi / 2
+    angles = -bbox_yaw + np.pi / 2
+    # angles = torch.atan2(state_masked[:, 0, 2].type(torch.float64),
+    #                      state_masked[:, 0, 3].type(torch.float64))
     rot_mat = torch.eye(3, dtype=torch.float64).unsqueeze(0).repeat(cur_3d.shape[0], 1, 1).to(cur_3d.device)
     rot_mat[:, 0, 0] = torch.cos(angles)
     rot_mat[:, 1, 1] = torch.cos(angles)
