@@ -7,7 +7,6 @@ from waymo_open_dataset.protos import motion_submission_pb2
 
 
 def create_subm(model, loader, rgb_loader=None, out_file="file.pb"):
-
     motion_challenge_submission = motion_submission_pb2.MotionChallengeSubmission()
 
     motion_challenge_submission.account_name = "alex.postnikov@skolkovotech.ru"
@@ -114,27 +113,19 @@ def train_multymodal(model, loaders, optimizer, num_ep=10, checkpointer=None, lo
         checkpointer.save(epoch, train_losses.mean().item())
 
 
-def goal_vector_to_gmm(predictions, rot_mat_inv, out_modes=6):
-    bs = predictions.shape[0]
-    mean_predictions = predictions[:, :2 * out_modes].reshape(bs, out_modes, 2)
-    cov_predictions = 3 * torch.eye(2).unsqueeze(0).unsqueeze(0).repeat(bs, out_modes, 1, 1).to(
-        mean_predictions.device)
-    probs_predictions = predictions[:, -out_modes:]
-
-    probs_predictions = torch.sigmoid(probs_predictions)
-    mix = torch.distributions.Categorical(probs_predictions)
-
-    scale_tril = torch.tril(((cov_predictions ** 2) + 1e-6))
-    scale_tril[:, :, 1, 0] = cov_predictions[:, :, 1, 0]
-
-    distr = torch.distributions.multivariate_normal.MultivariateNormal(mean_predictions, scale_tril=scale_tril)
-
-    gmm = torch.distributions.MixtureSameFamily(mix, distr)
-    return gmm
-
-
 def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_prediction=1,
-                scheduler=None, rgb_loader=None):
+                scheduler=None, rgb_loader=None) -> torch.Tensor:
+    """
+    Train for one epoch on the training set
+    @param epoch: current epoch number
+    @param logger: logger to save training loss
+    @param model: model to train
+    @param optimizer: optimizer to use
+    @param train_loader: training set loader
+    @param use_every_nth_prediction: use every nth prediction
+    @param scheduler: scheduler to use
+    @param rgb_loader: rgb loader
+    """
     losses = torch.rand(0)
     mades = torch.rand(0)
     mfdes = torch.rand(0)
@@ -143,7 +134,7 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
         optimizer.zero_grad()
         if rgb_loader is not None:
             data["rgbs"] = torch.tensor(rgb_loader.load_batch_rgb(data, prefix="").astype(np.float32))
-        
+
         batch_unpacked = preprocess_batch(data, model.module.use_points, model.module.use_vis)
 
         poses, confs, goals_local, rot_mat, rot_mat_inv = model(batch_unpacked)
@@ -158,7 +149,9 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
 
         m_ades = (torch.norm((fut_path.unsqueeze(2) - poses), dim=-1) * valid.unsqueeze(2)).mean(1).min(
             -1).values.mean()
-        m_fdes = (torch.norm((fut_path[:, -1].unsqueeze(1) - goals_local.reshape(-1,6,2)), dim=-1) * valid[:, -1].unsqueeze(1)).min(
+        m_fdes = (torch.norm((fut_path[:, -1].unsqueeze(1) - goals_local.reshape(-1, 6, 2)), dim=-1) * valid[:,
+                                                                                                       -1].unsqueeze(
+            1)).min(
             -1).values
         m_fdes = m_fdes[m_fdes > 0]
         if len(m_fdes) > 0:
@@ -167,9 +160,11 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
             m_fde = torch.tensor([0.]).to(m_fdes.device)
         fut_path_masked = fut_path.unsqueeze(2) * valid.unsqueeze(2).unsqueeze(2)
         pred_masked = poses * valid.unsqueeze(2).unsqueeze(2)
-        loss_nll = -log_likelihood(fut_path_masked, pred_masked, confs).mean()
-        goals_masked = (valid.unsqueeze(2).unsqueeze(2)[:,-1] * goals_local.reshape(-1,6,2))
-        loss_goals = -log_likelihood(fut_path_masked[:,  -1:], goals_masked.unsqueeze(1), confs).mean()
+        selector = np.arange(4, 80 + 1, 5)
+        loss_nll = -log_likelihood(fut_path_masked[:, selector], pred_masked[:, selector], confs).mean() \
+                   - 0.1 * log_likelihood(fut_path_masked, pred_masked, confs).mean()
+        goals_masked = (valid.unsqueeze(2).unsqueeze(2)[:, -1] * goals_local.reshape(-1, 6, 2))
+        loss_goals = -log_likelihood(fut_path_masked[:, -1:], goals_masked.unsqueeze(1), confs).mean()
         m_ade = m_ades.mean()
 
         loss = 0.01 * m_ade + 1 * loss_nll + 1 * loss_goals
@@ -199,7 +194,13 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
     return losses
 
 
-def apply_tr(poses, tr):
+def apply_tr(poses, tr) -> torch.Tensor:
+    """
+    Apply a transformation to a set of poses
+    :param poses: [B, N, 2]
+    :param tr:  [B, 3, 3]
+    :return: [B, N, 2]
+    """
     poses_exp = torch.cat([poses, torch.ones_like(poses[..., :1])], dim=-1)
     bs, times, modes, datadim = poses_exp.shape
     poses_exp = torch.bmm(tr, rearrange(poses_exp, "bs times  modes  datadim -> bs  datadim  (times  modes) "))
@@ -208,48 +209,10 @@ def apply_tr(poses, tr):
     return poses_exp
 
 
-def uni_ade_poses(data, predictions, use_every_nth_prediction=1):
-    bs, num_ped, future_steps, _ = predictions.shape
-    gt_fut = get_future(data).to(predictions.device)[:, use_every_nth_prediction - 1::use_every_nth_prediction]
-    mask = data["state/tracks_to_predict"].reshape(-1, 128)  # .repeat(1, 1, 80) > 0)
-    gt_fut = gt_fut.permute(0, 2, 1, 3)[mask > 0]
-    # assert gt_fut.shape == torch.Size([bs, future_steps, num_ped, 2])
-
-    cur = get_current(data).to(predictions.device)
-    cur = cur.permute(0, 2, 1, 3)[mask > 0]  # [:,0,:]
-    # assert cur.shape == torch.Size([bs, 1, num_ped, 2])
-    gt_fut = gt_fut - cur
-    fut_valid = data["state/future/valid"].reshape(-1, 128, 80)[mask > 0].unsqueeze(2).to(predictions.device)
-    fut_valid = fut_valid[:, use_every_nth_prediction - 1::use_every_nth_prediction]
-    err = (predictions[:, 0] - gt_fut)[fut_valid[:, :, 0] > 0]
-    dist = torch.norm(err, dim=-1)
-    return dist
-
-
-def goals_nll(gmm, data):
-    gt_fut = get_future(data).to(gmm.device)[:, -1]
-    mask = data["state/tracks_to_predict"].reshape(-1, 128)  # .repeat(1, 1, 80) > 0)
-    gt_fut = gt_fut[mask > 0]
-
-
-def uni_fde_poses(data, predictions):
-    bs, num_ped, future_steps, _ = predictions.shape
-    gt_fut = get_future(data).to(predictions.device)[:, -1]
-    mask = data["state/tracks_to_predict"].reshape(-1, 128)  # .repeat(1, 1, 80) > 0)
-    gt_fut = gt_fut[mask > 0]
-    # assert gt_fut.shape == torch.Size([bs, future_steps, num_ped, 2])
-
-    cur = get_current(data).to(predictions.device)
-    cur = cur.permute(0, 2, 1, 3)[mask > 0]  # [:,0,:]
-    # assert cur.shape == torch.Size([bs, 1, num_ped, 2])
-    gt_fut = gt_fut - cur[:, 0]
-    fut_valid = data["state/future/valid"].reshape(-1, 128, 80)[mask > 0].unsqueeze(2).to(predictions.device)
-    err = (predictions[:, 0, -1] - gt_fut) * fut_valid[:, -1]
-    dist = torch.norm(err, dim=-1)
-    return dist[dist > 0]
-
-
 def get_future(data):
+    """
+    extract the future path from a batch of data
+    """
     bs = data["state/future/x"].shape[0]
     gt_fut = torch.cat([data["state/future/x"].reshape(bs, 128, 80, 1), data["state/future/y"].reshape(bs, 128, 80, 1)],
                        -1)
@@ -338,7 +301,7 @@ def ade_loss(data, pred):
     return ade.mean()
 
 
-def log_likelihood(ground_truth, predicted, weights, sigma=1.0):
+def log_likelihood(ground_truth, predicted, weights, sigma=1.0) -> torch.Tensor:
     """Calculates log-likelihood of the ground_truth trajectory
     under the factorized gaussian mixture parametrized by predicted trajectories, weights and sigma.
     Please follow the link below for the metric formulation:
@@ -427,54 +390,54 @@ def pytorch_neg_multi_log_likelihood_batch(data, logits, confidences, use_every_
 
 
 def preprocess_batch(data, use_points=False, use_vis=False):
-        bs = data["state/tracks_to_predict"].shape[0]
-        masks = data["state/tracks_to_predict"].reshape(-1, 128) > 0
-        bsr = masks.sum()  # num peds to predict, bs real
-        # positional embedder
-        cur = torch.cat(
-            [data["state/current/x"].reshape(-1, 128, 1, 1), data["state/current/y"].reshape(-1, 128, 1, 1)], -1)
-        agent_type = data["state/type"].reshape(-1, 128, 1, 1).repeat(1, 1, 11, 1)
-        past = torch.cat([data["state/past/x"].reshape(-1, 128, 10, 1), data["state/past/y"].reshape(-1, 128, 10, 1)],
-                         -1)  # .permute(0, 2, 1, 3)
-        poses = torch.cat([cur, torch.flip(past, dims=[2])], dim=2).reshape(bs * 128, 11, -1).cuda()
-        velocities = torch.zeros_like(poses)
-        velocities[:, :-1] = poses[:, :-1] - poses[:, 1:]
-        state = torch.cat([poses, velocities], dim=-1)
-        state_masked = state.reshape(bs, 128, 11, -1)[masks]
-        rot_mat = create_rot_matrix(state_masked, data["state/current/bbox_yaw"][masks])
-        rot_mat_inv = torch.inverse(rot_mat).type(torch.float32)
-        ### rotate cur state
-        state_expanded = torch.cat([state_masked[:, :, :2], torch.ones_like(state_masked[:, :, :1])], -1)
-        state_masked[:, :, :2] = torch.bmm(rot_mat, state_expanded.permute(0, 2, 1).type(torch.float64)).permute(0, 2,
-                                                                                                                 1)[:,
-                                 :, :2].type(torch.float32)
-        rot_mat = rot_mat.type(torch.float32)
-        assert ((np.linalg.norm(state_masked[:, 0, :2].cpu() - np.zeros_like(state_masked[:, 0, :2].cpu()),
-                                axis=1) < 1e-4).all())
-        state_masked[:, :-1, 2:] = state_masked[:, :-1, :2] - state_masked[:, 1:, :2]
-        # assert ((np.linalg.norm(state_masked[:, 0, 2:3].cpu() - np.zeros_like(state_masked[:, 0, 2:3].cpu()),
-        #                         axis=1) < 0.1).all())
+    bs = data["state/tracks_to_predict"].shape[0]
+    masks = data["state/tracks_to_predict"].reshape(-1, 128) > 0
+    bsr = masks.sum()  # num peds to predict, bs real
+    # positional embedder
+    cur = torch.cat(
+        [data["state/current/x"].reshape(-1, 128, 1, 1), data["state/current/y"].reshape(-1, 128, 1, 1)], -1)
+    agent_type = data["state/type"].reshape(-1, 128, 1, 1).repeat(1, 1, 11, 1)
+    past = torch.cat([data["state/past/x"].reshape(-1, 128, 10, 1), data["state/past/y"].reshape(-1, 128, 10, 1)],
+                     -1)  # .permute(0, 2, 1, 3)
+    poses = torch.cat([cur, torch.flip(past, dims=[2])], dim=2).reshape(bs * 128, 11, -1).cuda()
+    velocities = torch.zeros_like(poses)
+    velocities[:, :-1] = poses[:, :-1] - poses[:, 1:]
+    state = torch.cat([poses, velocities], dim=-1)
+    state_masked = state.reshape(bs, 128, 11, -1)[masks]
+    rot_mat = create_rot_matrix(state_masked, data["state/current/bbox_yaw"][masks])
+    rot_mat_inv = torch.inverse(rot_mat).type(torch.float32)
+    ### rotate cur state
+    state_expanded = torch.cat([state_masked[:, :, :2], torch.ones_like(state_masked[:, :, :1])], -1)
+    state_masked[:, :, :2] = torch.bmm(rot_mat, state_expanded.permute(0, 2, 1).type(torch.float64)).permute(0, 2,
+                                                                                                             1)[:,
+                             :, :2].type(torch.float32)
+    rot_mat = rot_mat.type(torch.float32)
+    assert ((np.linalg.norm(state_masked[:, 0, :2].cpu() - np.zeros_like(state_masked[:, 0, :2].cpu()),
+                            axis=1) < 1e-4).all())
+    state_masked[:, :-1, 2:] = state_masked[:, :-1, :2] - state_masked[:, 1:, :2]
+    # assert ((np.linalg.norm(state_masked[:, 0, 2:3].cpu() - np.zeros_like(state_masked[:, 0, 2:3].cpu()),
+    #                         axis=1) < 0.1).all())
 
-        xyz_personal, maps = torch.rand(bsr), torch.rand(bsr)
-        if use_points:
-            xyz = data["roadgraph_samples/xyz"].reshape(bs, -1, 3)[:, ::2].cuda()
-            xyz_personal = torch.zeros([0, xyz.shape[1], xyz.shape[2]], device=xyz.device)
-            ## rotate pointclouds
-            # ...
-            for i, index in enumerate(masks.nonzero()):
-                xyz_p = torch.ones([xyz.shape[1], xyz.shape[2]], device=xyz.device)
-                xyz_p[:, :2] = xyz[index[0], :, :2].clone()
-                xyz_p = (rot_mat[i] @ xyz_p.T).T
-                xyz_personal = torch.cat((xyz_personal, xyz_p.unsqueeze(0)), dim=0)
-        if use_vis:
-            try:
-                # rasters = self.rgb_loader.load_batch_rgb(data, prefix="").astype(np.float32)
-                maps = data["rgbs"].permute(0, 3, 1, 2) / 255.
-            except KeyError as e:
-                raise e
-        # cat state and type
-        state_masked = torch.cat([state_masked, agent_type[masks].to(state_masked.device)], dim=-1)
-        return masks, rot_mat, rot_mat_inv, state_masked, xyz_personal, maps
+    xyz_personal, maps = torch.rand(bsr), torch.rand(bsr)
+    if use_points:
+        xyz = data["roadgraph_samples/xyz"].reshape(bs, -1, 3)[:, ::2].cuda()
+        xyz_personal = torch.zeros([0, xyz.shape[1], xyz.shape[2]], device=xyz.device)
+        ## rotate pointclouds
+        # ...
+        for i, index in enumerate(masks.nonzero()):
+            xyz_p = torch.ones([xyz.shape[1], xyz.shape[2]], device=xyz.device)
+            xyz_p[:, :2] = xyz[index[0], :, :2].clone()
+            xyz_p = (rot_mat[i] @ xyz_p.T).T
+            xyz_personal = torch.cat((xyz_personal, xyz_p.unsqueeze(0)), dim=0)
+    if use_vis:
+        try:
+            # rasters = self.rgb_loader.load_batch_rgb(data, prefix="").astype(np.float32)
+            maps = data["rgbs"].permute(0, 3, 1, 2) / 255.
+        except KeyError as e:
+            raise e
+    # cat state and type
+    state_masked = torch.cat([state_masked, agent_type[masks].to(state_masked.device)], dim=-1)
+    return masks, rot_mat, rot_mat_inv, state_masked, xyz_personal, maps
 
 
 def create_rot_matrix(state_masked, bbox_yaw=None):
@@ -492,4 +455,3 @@ def create_rot_matrix(state_masked, bbox_yaw=None):
     rot_mat[:, 1, 0] = torch.sin(angles)
     transform = rot_mat @ T
     return transform
-

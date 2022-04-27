@@ -318,6 +318,65 @@ class DecoderTraj(nn.Module):
         return trajectories, confidences
 
 
+class DecoderTraj3(nn.Module):
+
+    def __init__(self, inp_dim=32, inp_hor=12, out_modes=1, out_dim=2, out_horiz=12, dr_rate=0.1, use_recurrent=False):
+        super().__init__()
+        self.out_modes, self.out_dim, self.out_horiz = out_modes, out_dim, out_horiz
+        self.goal_embeder = nn.Sequential(nn.Linear(2, 8),
+                                          nn.ReLU(),
+                                          nn.Linear(8, inp_dim//2))
+        out_shape = out_dim * out_modes * out_horiz + self.out_modes
+        self.out_shape = out_shape
+
+        self.outlayers = nn.Sequential(
+            nn.Linear(out_shape * 2 + 32, out_shape * 4),
+            nn.ReLU(),
+
+            nn.Linear(out_shape * 4, out_shape * 2),
+            nn.ReLU(),
+            nn.Dropout(dr_rate),
+            nn.LayerNorm(out_shape * 2),
+            nn.Linear(out_shape * 2, out_shape)
+        )
+        # self.att = nn.MultiheadAttention(out_shape * 2, out_modes, dropout=0.)
+
+        self.encoder_layer = nn.TransformerEncoderLayer(d_model=out_shape * 2 + 32, nhead=4)
+        self.transformer_encoder = nn.TransformerEncoder(self.encoder_layer, num_layers=2)
+
+        self.q_mlp = nn.Linear(inp_dim + inp_dim//2 + 16, out_shape * 2)
+
+        self.conf_mlp = nn.Sequential(nn.Linear(self.out_shape, self.out_shape * 2), nn.ReLU(),
+                                      nn.Linear(self.out_shape * 2, 1))
+        self.traj_mlp = nn.Sequential(nn.Linear(self.out_shape - self.out_modes, out_shape * 2 ), nn.ReLU(),
+                                      nn.Linear(out_shape * 2, self.out_dim * out_horiz))
+        self.use_recurrent = use_recurrent
+#         if use_recurrent:
+#             self.conf_mlp = nn.Sequential(nn.Linear(out_shape - self.out_modes, self.out_modes), nn.ReLU(),
+#                                           nn.Linear(self.out_modes, self.out_modes))
+
+#             self.rec = nn.GRU(out_shape * 2 + 32, out_dim * out_horiz)
+#             self.singl_mode = nn.GRU(2, 2)
+
+    def forward(self, hist_enc, goal):
+        bs = hist_enc.shape[0]
+        goal_embedded = self.goal_embeder(goal.reshape(bs, -1, 2))
+        inp = torch.cat((hist_enc, goal_embedded), dim=2)
+        inp_q = self.q_mlp(inp)
+
+        agent_h_te = time_encoding_sin(inp_q, added_emb_dim=32)
+        predictions = self.transformer_encoder(agent_h_te.permute(1, 0, 2)).permute(1, 0, 2)
+        predictions = self.outlayers(predictions)
+        confidences = torch.softmax(self.conf_mlp(predictions).reshape(bs, self.out_modes), dim=-1)
+        trajectories = self.traj_mlp(predictions[:, :, :self.out_shape - self.out_modes]).reshape(bs, self.out_modes,
+                                                                                                  self.out_horiz,
+                                                                                                  self.out_dim)
+        # trajectories = trajectories.cumsum(2)
+        return trajectories, confidences
+
+
+
+
 class DecoderTraj2(nn.Module):
 
     def __init__(self, inp_dim=32, inp_hor=12, out_modes=1, out_dim=2, out_horiz=12, dr_rate=0.1, use_recurrent=False):
@@ -387,7 +446,6 @@ class DecoderTraj2(nn.Module):
         # trajectories = trajectories.cumsum(2)
         return trajectories, confidences
 
-
 def gmm_to_mean_goal(gmm):
     return gmm.mean
 
@@ -441,6 +499,47 @@ class AttPredictorPecNet(nn.Module):
 
         return predictions.permute(0, 2, 1, 3), confidences, goal_vector,  rot_mat, rot_mat_inv
 
+class AttPredictorPecNetWithTypeD3(nn.Module):
+    def __init__(self, inp_dim=32, embed_dim=128, num_blocks=8, out_modes=1, out_dim=2, out_horiz=12,
+                 dr_rate=0.0, use_vis=True, use_points=True, use_map=True, use_rec=False):
+        super().__init__()
+        self.use_gt_goals = False
+        self.use_points = use_points
+        if use_points:
+            self.pointNet = PointNetfeat(global_feat=True)
+        self.use_vis = use_vis
+        if use_vis:
+            self.rgb_loader = RgbLoader(index_path="rendered/train/index.pkl")
+            self.visual = models.resnet18(pretrained=True)
+            self.visual.fc = torch.nn.Linear(512, 1024)
+        self.latent = nn.Parameter(torch.rand(out_modes, embed_dim + 16), requires_grad=True)
+        self.embeder = InitEmbedding(inp_dim=5, out_dim=embed_dim, use_recurrent=use_rec)
+        self.encoder = Encoder(inp_dim, embed_dim, num_blocks, use_vis=use_vis, use_points=use_points, dr_rate=dr_rate)
+        self.decoder_goals = DecoderGoals(embed_dim, 12, out_modes, dr_rate=dr_rate, use_recurrent=use_rec)
+        self.decoder_trajs = DecoderTraj3(embed_dim, 12, out_modes, out_dim, out_horiz, dr_rate, use_recurrent=use_rec)
+
+    def forward(self, batch_unpacked):
+        ## xyz emb
+        masks, rot_mat, rot_mat_inv, state_masked, xyz_personal, maps = batch_unpacked
+        bsr = state_masked.shape[0]
+        agent_h_emb = self.embeder(state_masked)
+        # pointnet embedder
+        xyz_emb = None
+        if self.use_points:
+            xyz_emb, _, _ = self.pointNet(xyz_personal.permute(0, 2, 1))
+
+        img_emb = None
+        if self.use_vis:
+            maps = maps[:, :3].to(self.latent.device) #cuda()
+            img_emb = self.visual(maps) #.to(self.latent.device).cuda()
+        x = self.latent.unsqueeze(0).repeat(bsr, 1, 1)
+        x = self.encoder(x, img_emb, agent_h_emb, xyz_emb)
+        goal_vector = self.decoder_goals(x)
+        predictions, confidences = self.decoder_trajs(x, goal_vector)
+
+        return predictions.permute(0, 2, 1, 3), confidences, goal_vector,  rot_mat, rot_mat_inv
+
+
 class AttPredictorPecNetWithType(nn.Module):
     def __init__(self, inp_dim=32, embed_dim=128, num_blocks=8, out_modes=1, out_dim=2, out_horiz=12,
                  dr_rate=0.0, use_vis=True, use_points=True, use_map=True, use_rec=False):
@@ -480,6 +579,8 @@ class AttPredictorPecNetWithType(nn.Module):
         predictions, confidences = self.decoder_trajs(x, goal_vector)
 
         return predictions.permute(0, 2, 1, 3), confidences, goal_vector,  rot_mat, rot_mat_inv
+
+
 
 
 class CovNet(nn.Module):
