@@ -140,7 +140,7 @@ def vis_cur_and_fut(decoded_example, predictions=None, size_pixels=1000, bn=0, c
     future_states_mask *= np.repeat(data["state/tracks_to_predict"].reshape(128, 1), 80, axis=1)>0
     im = visualize_one_step_with_future(s[:, 0], m[:, 0], future_states, future_states_mask, roadgraph_xyz,
                             'cur with fut', center_y, center_x, width, color_map, size_pixels,
-                                        predictions=prediction, confs=confs[(data["state/tracks_to_predict"]>0).nonzero()])
+                                        predictions=prediction, confs=confs)
     return im
 
 
@@ -214,7 +214,7 @@ def visualize_one_step_with_future(states, mask, future_states, future_states_ma
                     maskeds_y,
                     # marker='o',
                     linewidth=5*conf,
-                    color=colors - np.array([0, 0, 0, 1-conf]),
+                    color=colors - 0.3*np.array([0, 0, 0, 1-conf]),
                 )
                 ax.text(maskeds_x[-1], maskeds_y[-1], f"{conf:.2f}",
                         fontsize="xx-small")
