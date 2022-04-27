@@ -4,7 +4,7 @@ from pathlib import Path
 sys.path.append(str(Path.cwd().parent))
 import tensorflow as tf
 
-from scripts.iab import AttPredictorPecNet, AttPredictorPecNetWithType
+from scripts.iab import AttPredictorPecNet, AttPredictorPecNetWithType, AttPredictorPecNetWithTypeD3
 from scripts.train import train_multymodal
 from scripts.config import build_parser
 from scripts.models import Checkpointer
@@ -15,22 +15,20 @@ tf.get_logger().setLevel('ERROR')
 
 import torch.utils.data
 
-
 import numpy as np
 import wandb
 import random
 import torch.optim as optim
-from transformers import get_cosine_with_hard_restarts_schedule_with_warmup
-
-
+import os
+from torch.optim.lr_scheduler import LambdaLR
+from torch.optim import Optimizer
+import math
 
 parser = build_parser()
 config = parser.parse_args()
 random.seed(config.np_seed)
 torch.manual_seed(config.torch_seed)
 np.random.seed(config.np_seed)
-
-import os
 
 wandb.init(project="waymo22", entity="aleksey-postnikov", name=config.exp_name)
 wandb.config = {
@@ -52,20 +50,18 @@ test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size,
 
 device = "cuda"
 
-net = AttPredictorPecNetWithType(inp_dim=config.exp_inp_dim, embed_dim=config.exp_embed_dim, num_blocks=config.exp_num_blocks,
-                         out_modes=6, use_vis=config.exp_use_vis, use_rec=config.exp_use_rec,
-                         use_points=config.exp_use_points, out_horiz=80 // config.use_every_nth_prediction)
+net = AttPredictorPecNetWithTypeD3(inp_dim=config.exp_inp_dim, embed_dim=config.exp_embed_dim,
+                                 num_blocks=config.exp_num_blocks,
+                                 out_modes=6, use_vis=config.exp_use_vis, use_rec=config.exp_use_rec,
+                                 use_points=config.exp_use_points, out_horiz=80 // config.use_every_nth_prediction)
 net = torch.nn.DataParallel(net)
 
 optimizer = optim.Adam(net.parameters(), lr=wandb.config["learning_rate"])
 
-from transformers import get_cosine_with_hard_restarts_schedule_with_warmup
-from torch.optim.lr_scheduler import LambdaLR
-from torch.optim import Optimizer
-import math
 
 def get_cosine_with_hard_restarts_schedule_with_warmup_with_min(
-    optimizer: Optimizer, num_warmup_steps: int, num_training_steps: int, num_cycles: int = 1, last_epoch: int = -1, minimal_coef: float = 0.2
+        optimizer: Optimizer, num_warmup_steps: int, num_training_steps: int, num_cycles: int = 1, last_epoch: int = -1,
+        minimal_coef: float = 0.2
 ):
     """
     Create a schedule with a learning rate that decreases following the values of the cosine function between the
@@ -97,18 +93,16 @@ def get_cosine_with_hard_restarts_schedule_with_warmup_with_min(
         return max(minimal_coef, 0.5 * (1.0 + math.cos(math.pi * ((float(num_cycles) * progress) % 1.0))))
 
     return LambdaLR(optimizer, lr_lambda, last_epoch)
-# return LambdaLR(optimizer, lr_lambda, last_epoch)
-
 
 
 scheduler = get_cosine_with_hard_restarts_schedule_with_warmup_with_min(
-            optimizer=optimizer,
-            num_warmup_steps=20,
-            num_training_steps=(22000*128 / config.exp_batch_size) * wandb.config["epochs"],
-            num_cycles=wandb.config["epochs"], minimal_coef=0.8)
+    optimizer=optimizer,
+    num_warmup_steps=20,
+    num_training_steps=(22000 * 128 / config.exp_batch_size) * wandb.config["epochs"],
+    num_cycles=wandb.config["epochs"], minimal_coef=0.8)
 net = net.to(device)
 
-checkpointer = Checkpointer(model=net, torch_seed=0, ckpt_dir=config.dir_checkpoint, checkpoint_frequency=1)
+checkpointer = Checkpointer(model=net, torch_seed=config.torch_seed, ckpt_dir=config.dir_checkpoint, checkpoint_frequency=1)
 net = checkpointer.load(config.epoch_to_load)
 
 
