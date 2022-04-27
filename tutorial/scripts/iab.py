@@ -424,7 +424,7 @@ class AttPredictorPecNet(nn.Module):
         ## xyz emb
         masks, rot_mat, rot_mat_inv, state_masked, xyz_personal, maps = batch_unpacked
         bsr = state_masked.shape[0]
-        agent_h_emb = self.embeder(state_masked)
+        agent_h_emb = self.embeder(state_masked[:,:,:4])
         # pointnet embedder
         xyz_emb = None
         if self.use_points:
