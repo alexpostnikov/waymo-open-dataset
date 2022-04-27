@@ -102,7 +102,7 @@ scheduler = get_cosine_with_hard_restarts_schedule_with_warmup_with_min(
     num_cycles=wandb.config["epochs"], minimal_coef=0.8)
 net = net.to(device)
 
-checkpointer = Checkpointer(model=net, torch_seed=0, ckpt_dir=config.dir_checkpoint, checkpoint_frequency=1)
+checkpointer = Checkpointer(model=net, torch_seed=config.torch_seed, ckpt_dir=config.dir_checkpoint, checkpoint_frequency=1)
 net = checkpointer.load(config.epoch_to_load)
 
 
