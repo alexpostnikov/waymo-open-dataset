@@ -1,6 +1,7 @@
 import numpy as np
 from six.moves import cPickle as pickle
 import logging
+import torch
 
 
 
@@ -60,6 +61,23 @@ class RgbLoader():
             else:
                 out_files[file] = [[name, i]]
         return out_files
+
+    def load_multybatch_rgb(self, data, prefix="tutorial/"):
+        out = []
+        multy_batch = data["state/current/x"].shape[0]
+        max_len = 0
+        for batch in range(multy_batch):
+            data_b = {"scenario/id": data["scenario/id"][batch], "state/tracks_to_predict": data["state/tracks_to_predict"][batch],
+                      "state/id": data["state/id"][batch]}
+            rgb = self.load_batch_rgb(data_b, prefix)
+            max_len = max(rgb.shape[0], max_len)
+            out.append(rgb)
+        # form out tensor with shape (multy_batch, max_len, rgb.shape[1], rgb.shape[2], rgb.shape[3])
+        out_tensor = torch.zeros(multy_batch, max_len, out[0][0].shape[1], out[0][0].shape[2], out[0][0].shape[3])
+        for i, rgb in enumerate(out):
+            out_tensor[i, :rgb.shape[0]] = rgb
+        return out_tensor
+
 
     def load_batch_rgb(self, data, prefix="tutorial/"):
         batch = data['scenario/id']

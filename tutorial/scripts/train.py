@@ -132,8 +132,10 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
     pbar = tqdm(train_loader)
     for chank, data in enumerate(pbar):
         optimizer.zero_grad()
+        data = split_dict_of_tensors_by_num_gpus(data)
+
         if rgb_loader is not None:
-            data["rgbs"] = torch.tensor(rgb_loader.load_batch_rgb(data, prefix="").astype(np.float32))
+            data["rgbs"] = torch.tensor(rgb_loader.load_multybatch_rgb(data, prefix="").astype(np.float32))
 
         batch_unpacked = preprocess_batch(data, model.module.use_points, model.module.use_vis, use_gat=1)
 
@@ -391,6 +393,7 @@ def pytorch_neg_multi_log_likelihood_batch(data, logits, confidences, use_every_
 
 def preprocess_batch(data, use_points=False, use_vis=False, use_gat=False):
     bs = data["state/tracks_to_predict"].shape[0]
+
     masks = data["state/tracks_to_predict"].reshape(-1, 128) > 0
     bsr = masks.sum()  # num peds to predict, bs real
     # positional embedder
@@ -441,6 +444,50 @@ def preprocess_batch(data, use_points=False, use_vis=False, use_gat=False):
     if use_gat:
         states, graph = prepare_data_for_gat(data, "cuda")
     return masks, rot_mat, rot_mat_inv, state_masked, xyz_personal, maps, states, graph
+
+
+def split_dict_of_tensors_by_num_gpus(data):
+    '''
+    :param data: dict of tensors
+    :return:
+    '''
+    num_gpus = torch.cuda.device_count() + 1
+    for k, v in data.items():
+        data[k] = split_tensor_by_num_gpus(v, num_gpus)
+    return data
+
+
+
+def split_data_by_num_gpus(data):
+    #get number of gpus
+    num_gpus = torch.cuda.device_count()
+
+    num_gpus+=1
+    # if num_gpus == 1:
+    #     return data
+
+    masks, rot_mat, rot_mat_inv, state_masked, xyz_personal, maps, states, graph = data
+
+    masks = split_tensor(masks, num_gpus)
+    rot_mat = split_tensor(rot_mat, num_gpus)
+    rot_mat_inv = split_tensor(rot_mat_inv, num_gpus)
+    state_masked = split_tensor(state_masked, num_gpus)
+    xyz_personal = split_tensor(xyz_personal, num_gpus)
+    maps = split_tensor(maps, num_gpus)
+
+    # states = split_tensor(states, num_gpus)
+    return masks, rot_mat, rot_mat_inv, state_masked, xyz_personal, maps, states, graph
+
+
+def split_tensor_by_num_gpus(data, num_gpus):
+    data_split = torch.split(data, np.ceil(data.size(0) / num_gpus).astype(np.int32).item(), dim=0)
+    # stack masks
+    data_t_split_t = torch.stack(data_split[:-1], dim=0)
+    a = torch.zeros_like(data_split[0])
+    a[:data_split[-1].shape[0]] = data_split[-1]
+    data_t_split_t = torch.cat([data_t_split_t, a.unsqueeze(0)], dim=0)
+    return data_t_split_t
+
 
 
 def create_rot_matrix(state_masked, bbox_yaw=None):
