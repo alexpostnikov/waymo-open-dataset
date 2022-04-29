@@ -4,7 +4,7 @@ from pathlib import Path
 sys.path.append(str(Path.cwd().parent))
 import tensorflow as tf
 
-from scripts.iab import AttPredictorPecNet, AttPredictorPecNetWithType, AttPredictorPecNetWithTypeD3
+from scripts.iab import AttPredictorPecNetGat, AttPredictorPecNetWithType, AttPredictorPecNetWithTypeD3
 from scripts.train import train_multymodal
 from scripts.config import build_parser
 from scripts.models import Checkpointer
@@ -50,10 +50,11 @@ test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size,
 
 device = "cuda"
 
-net = AttPredictorPecNetWithTypeD3(inp_dim=config.exp_inp_dim, embed_dim=config.exp_embed_dim,
-                                 num_blocks=config.exp_num_blocks,
-                                 out_modes=6, use_vis=config.exp_use_vis, use_rec=config.exp_use_rec,
-                                 use_points=config.exp_use_points, out_horiz=80 // config.use_every_nth_prediction)
+net = AttPredictorPecNetGat(inp_dim=config.exp_inp_dim, embed_dim=config.exp_embed_dim,
+                            num_blocks=config.exp_num_blocks,
+                            out_modes=6, use_vis=config.exp_use_vis, use_rec=config.exp_use_rec,
+                            use_points=config.exp_use_points, out_horiz=80 // config.use_every_nth_prediction,
+                            use_gat=1)
 net = torch.nn.DataParallel(net)
 
 optimizer = optim.Adam(net.parameters(), lr=wandb.config["learning_rate"])

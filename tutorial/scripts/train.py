@@ -4,7 +4,7 @@ import torch.nn as nn
 import numpy as np
 from einops import rearrange
 from waymo_open_dataset.protos import motion_submission_pb2
-
+from scripts.dataloaders import prepare_data_for_gat
 
 def create_subm(model, loader, rgb_loader=None, out_file="file.pb"):
     motion_challenge_submission = motion_submission_pb2.MotionChallengeSubmission()
@@ -24,7 +24,7 @@ def create_subm(model, loader, rgb_loader=None, out_file="file.pb"):
             if rgb_loader is not None:
                 data["rgbs"] = torch.tensor(rgb_loader.load_batch_rgb(data, prefix="").astype(np.float32))
 
-            batch_unpacked = preprocess_batch(data, model.module.use_points, model.module.use_vis)
+            batch_unpacked = preprocess_batch(data, model.module.use_points, model.module.use_vis, use_gat=1)
             logits, confidences, goals, rot_mat, rot_mat_inv = model(batch_unpacked)
             # logits, confidences, goals, goal_vector, rot_mat, rot_mat_inv = model(data)
             logits = apply_tr(logits, rot_mat_inv)
@@ -135,7 +135,7 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
         if rgb_loader is not None:
             data["rgbs"] = torch.tensor(rgb_loader.load_batch_rgb(data, prefix="").astype(np.float32))
 
-        batch_unpacked = preprocess_batch(data, model.module.use_points, model.module.use_vis)
+        batch_unpacked = preprocess_batch(data, model.module.use_points, model.module.use_vis, use_gat=1)
 
         poses, confs, goals_local, rot_mat, rot_mat_inv = model(batch_unpacked)
         mask = data["state/tracks_to_predict"]
@@ -389,7 +389,7 @@ def pytorch_neg_multi_log_likelihood_batch(data, logits, confidences, use_every_
     return torch.mean(error)
 
 
-def preprocess_batch(data, use_points=False, use_vis=False):
+def preprocess_batch(data, use_points=False, use_vis=False, use_gat=False):
     bs = data["state/tracks_to_predict"].shape[0]
     masks = data["state/tracks_to_predict"].reshape(-1, 128) > 0
     bsr = masks.sum()  # num peds to predict, bs real
@@ -437,7 +437,10 @@ def preprocess_batch(data, use_points=False, use_vis=False):
             raise e
     # cat state and type
     state_masked = torch.cat([state_masked, agent_type[masks].to(state_masked.device)], dim=-1)
-    return masks, rot_mat, rot_mat_inv, state_masked, xyz_personal, maps
+    states, graph = None, None
+    if use_gat:
+        states, graph = prepare_data_for_gat(data, "cuda")
+    return masks, rot_mat, rot_mat_inv, state_masked, xyz_personal, maps, states, graph
 
 
 def create_rot_matrix(state_masked, bbox_yaw=None):
