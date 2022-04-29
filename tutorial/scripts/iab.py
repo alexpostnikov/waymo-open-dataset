@@ -3,11 +3,8 @@ import torch
 import torch.nn as nn
 import torch.distributions as D
 from scripts.pointNet import PointNetfeat
-from scripts.rasterization import rasterize_batch
 from scripts.rgb_loader import RgbLoader
-import timm
-import numpy as np
-from einops import rearrange
+from scripts.GAT import GAT
 import torchvision.models as models
 
 def get_n_params(model):
@@ -49,8 +46,8 @@ class InitEmbedding(nn.Module):
         agent_h = self.masking(agent_h, agent_h_avail)
         out = self.layers(agent_h)
         if self.use_recurrent:
-            out, (_) = self.rec(out.permute(1,0,2))
-            out = out.permute(1,0,2) 
+            out, (_) = self.rec(out.permute(1, 0, 2))
+            out = out.permute(1, 0 ,2)
         return out
 
 
@@ -89,47 +86,26 @@ def time_encoding_sin(neighb, added_emb_dim=16):
         return neighb
 
 
-class NeighbourAttentionTimeEncoding(nn.Module):
-    def __init__(self, inp_dim=64, embed_dim=64, pose_emb_dim=16, num_heads=16, dr_rate=0):
+class NeighbAttention(nn.Module):
+    def __init__(self, inp_dim, embed_dim=64, pose_emb_dim=16, num_heads=16, dr_rate=0):
         super().__init__()
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.pose_emb_dim = pose_emb_dim
         self.att = nn.MultiheadAttention(embed_dim + pose_emb_dim, num_heads, dropout=dr_rate)
-        self.q_mlp = nn.Linear(inp_dim + pose_emb_dim, embed_dim + pose_emb_dim)
-        self.k_mlp = nn.Linear(inp_dim + pose_emb_dim, embed_dim + pose_emb_dim)
-        self.v_mlp = nn.Linear(inp_dim + pose_emb_dim, embed_dim + pose_emb_dim)
-
-        self.silly_masking = True
+        self.q_mlp = nn.Linear(embed_dim + pose_emb_dim, embed_dim + pose_emb_dim)
+        self.k_mlp = nn.Linear(inp_dim, embed_dim + pose_emb_dim)
+        self.v_mlp = nn.Linear(inp_dim, embed_dim + pose_emb_dim)
         self.layer_norm = nn.LayerNorm(embed_dim + pose_emb_dim)
 
-    def masking(self, neighb_h, agent_h, neighb_h_avail, agent_h_avail):
-        if self.silly_masking:
-            neighb_h[neighb_h_avail == 0] = -100
-            agent_h[agent_h_avail == 0] = -100
-        return neighb_h, agent_h
-
     def forward(self, neighb_h, x):
-        # DO pose(time) embedding
-        neighb_h_te = time_encoding_sin(neighb_h, added_emb_dim=self.pose_emb_dim)
 
-        bs, num_n, seq_len, data_dim = neighb_h_te.shape
-
-        # flatten num_n and history_horizon
-        neighb_h_te = neighb_h_te.reshape(bs, num_n * seq_len, data_dim)
-
-        value = self.v_mlp(neighb_h_te).permute(1, 0, 2)
-        key = self.k_mlp(neighb_h_te).permute(1, 0, 2)
+        neighb_h = neighb_h.unsqueeze(1)
+        value = self.v_mlp(neighb_h).permute(1, 0, 2)
+        key = self.k_mlp(neighb_h).permute(1, 0, 2)
         query = self.q_mlp(x).permute(1, 0, 2)
         out, _ = (self.att(query, key, value))
         out = self.layer_norm(out.permute(1, 0, 2))
-        # out shape bs, history_horizon, embed_dim
-
-        # value = self.v_mlp_fin(out)  # .permute(1, 0, 2)
-        # key = self.k_mlp_fin(out)  # .permute(1, 0, 2)
-        # query = self.q_mlp_fin(agent_h).permute(1, 0, 2)
-        # out, _ = (self.att_fin(query, key, value))
-        # out = self.layer_norm(out)
         return out
 
 
@@ -158,8 +134,8 @@ class PoseAttention(nn.Module):
 
         query = self.q_mlp(x).permute(1, 0, 2)
         out, _ = self.att(query, key, value)
-        out = self.layer_norm(out)
-        return out.permute(1, 0, 2)
+        out = self.layer_norm(out.permute(1, 0, 2))
+        return out
 
 
 class SelfAttention(nn.Module):
@@ -208,31 +184,37 @@ class VisualAttentionTransformer(nn.Module):
         return agent_h
 
     def forward(self, resnet_out, agent_h, masking=0):
-        # print(self.v_mlp.in_features, resnet_out.shape)
         value = self.v_mlp(resnet_out).unsqueeze(1).permute(1, 0, 2)
         key = self.k_mlp(resnet_out).unsqueeze(1).permute(1, 0, 2)
         query = self.q_mlp(agent_h).permute(1, 0, 2)
         out, _ = self.att(query, key, value)
-        out = self.layer_norm(out)
-        return out.permute(1, 0, 2)
+        out = self.layer_norm(out.permute(1, 0, 2))
+        return out
 
 
 class PoseEncoderBlock(nn.Module):
-    def __init__(self, inp_dim=64, embed_dim=64, use_vis=True, use_segm=False, use_points=True, dr_rate=0):
+    def __init__(self, inp_dim=64, embed_dim=64, use_vis=True, use_segm=False, use_points=True,
+                 dr_rate=0, use_neighb_att=False):
         super().__init__()
         self.use_vis = use_vis
         self.use_points = use_points
         self.use_segm = use_segm
+        self.use_neighb_att = use_neighb_att
         self.sat = SelfAttention(inp_dim, embed_dim, dr_rate=dr_rate)
         self.pat = PoseAttention(inp_dim, embed_dim, data_dim=inp_dim, dr_rate=dr_rate)
         if use_vis:
             self.va = VisualAttentionTransformer(inp_dim, embed_dim, dr_rate=dr_rate)
         if use_points:
             self.pa = VisualAttentionTransformer(inp_dim, embed_dim, dr_rate=dr_rate)
+        if use_neighb_att:
+            self.na = NeighbAttention(embed_dim, embed_dim, dr_rate=dr_rate)
 
-    def forward(self, x, image_emb, agent_h_emb, points_emb):
+    def forward(self, x, image_emb, agent_h_emb, points_emb, neighb_emb=None):
 
         x = x + self.pat(x, agent_h_emb)
+
+        if self.use_neighb_att:
+            x = x + self.na(neighb_emb, x)
 
         if self.use_vis:
             x = x + self.va(image_emb, x)
@@ -246,15 +228,16 @@ class PoseEncoderBlock(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, inp_dim=64, embed_dim=64, num_blocks=16, use_vis=True, use_points=True, dr_rate=0):
+    def __init__(self, inp_dim=64, embed_dim=64, num_blocks=16, use_vis=True, use_points=True, dr_rate=0, use_gat=False):
         super().__init__()
         self.layers = nn.ModuleList(
-            [PoseEncoderBlock(inp_dim, embed_dim, use_vis=use_vis, use_points=use_points, dr_rate=dr_rate) for _ in
+            [PoseEncoderBlock(inp_dim, embed_dim, use_vis=use_vis, use_points=use_points, dr_rate=dr_rate,
+                              use_neighb_att=use_gat) for _ in
              range(num_blocks)])
 
-    def forward(self, x, image_emb, agent_h_emb, points_emb):
+    def forward(self, x, image_emb, agent_h_emb, points_emb, neighb_emb=None):
         for pose_encoder in self.layers:
-            x = pose_encoder(x, image_emb, agent_h_emb, points_emb)
+            x = pose_encoder(x, image_emb, agent_h_emb, points_emb, neighb_emb)
         return x
 
 
@@ -459,12 +442,22 @@ def gmm_means(gmm):
 
 
 
-class AttPredictorPecNet(nn.Module):
+class AttPredictorPecNetGat(nn.Module):
     def __init__(self, inp_dim=32, embed_dim=128, num_blocks=8, out_modes=1, out_dim=2, out_horiz=12,
-                 dr_rate=0.0, use_vis=True, use_points=True, use_map=True, use_rec=False):
+                 dr_rate=0.0, use_vis=True, use_points=True, use_map=True, use_rec=False, use_gat=False):
         super().__init__()
         self.use_gt_goals = False
         self.use_points = use_points
+        self.use_gat = use_gat
+
+        if self.use_gat:
+            num_of_layers = 3
+            num_heads_per_layer = [8, 8, 8]
+            # mlp emberder for gat
+            self.embeder_gat = nn.Sequential(nn.Linear(33, embed_dim), nn.ReLU(), nn.Linear(embed_dim,
+                                                                                                 embed_dim))
+            num_features_per_layer = [embed_dim] * 4
+            self.gat = GAT(num_of_layers, num_heads_per_layer, num_features_per_layer)
         if use_points:
             self.pointNet = PointNetfeat(global_feat=True)
         self.use_vis = use_vis
@@ -473,16 +466,26 @@ class AttPredictorPecNet(nn.Module):
             self.visual = models.resnet18(pretrained=True)
             self.visual.fc = torch.nn.Linear(512, 1024)
         self.latent = nn.Parameter(torch.rand(out_modes, embed_dim + 16), requires_grad=True)
-        self.embeder = InitEmbedding(inp_dim=4, out_dim=embed_dim, use_recurrent=use_rec)
-        self.encoder = Encoder(inp_dim, embed_dim, num_blocks, use_vis=use_vis, use_points=use_points, dr_rate=dr_rate)
+        self.embeder = InitEmbedding(inp_dim=5, out_dim=embed_dim, use_recurrent=use_rec)
+        self.encoder = Encoder(inp_dim, embed_dim, num_blocks, use_vis=use_vis, use_points=use_points,
+                               dr_rate=dr_rate, use_gat=use_gat)
         self.decoder_goals = DecoderGoals(embed_dim, 12, out_modes, dr_rate=dr_rate, use_recurrent=use_rec)
-        self.decoder_trajs = DecoderTraj2(embed_dim, 12, out_modes, out_dim, out_horiz, dr_rate, use_recurrent=use_rec)
+        self.decoder_trajs = DecoderTraj3(embed_dim, 12, out_modes, out_dim, out_horiz, dr_rate, use_recurrent=use_rec)
 
     def forward(self, batch_unpacked):
-        ## xyz emb
-        masks, rot_mat, rot_mat_inv, state_masked, xyz_personal, maps = batch_unpacked
+        masks, rot_mat, rot_mat_inv, state_masked, xyz_personal, maps, gat_states, graph = batch_unpacked
+        # if use_gat
+        n_att = None
+        if self.use_gat:
+            gse = self.embeder_gat(gat_states)
+            gat_out = self.gat((gse.reshape(-1, gse.size(-1)), graph))
+            out_nodes_features, _ = gat_out
+            out_nodes_features = out_nodes_features.view(gat_states.size(0), gat_states.size(1), -1)
+            n_att = out_nodes_features[masks]
+
+
         bsr = state_masked.shape[0]
-        agent_h_emb = self.embeder(state_masked[:,:,:4])
+        agent_h_emb = self.embeder(state_masked)
         # pointnet embedder
         xyz_emb = None
         if self.use_points:
@@ -493,7 +496,7 @@ class AttPredictorPecNet(nn.Module):
             maps = maps[:, :3].to(self.latent.device) #cuda()
             img_emb = self.visual(maps) #.to(self.latent.device).cuda()
         x = self.latent.unsqueeze(0).repeat(bsr, 1, 1)
-        x = self.encoder(x, img_emb, agent_h_emb, xyz_emb)
+        x = self.encoder(x, img_emb, agent_h_emb, xyz_emb, n_att)
         goal_vector = self.decoder_goals(x)
         predictions, confidences = self.decoder_trajs(x, goal_vector)
 
