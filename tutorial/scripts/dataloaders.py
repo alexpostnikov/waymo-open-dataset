@@ -8,7 +8,8 @@ import torch.utils
 from tfrecord.torch import TFRecordDataset
 import numpy as np
 import re
-
+from scripts.GAT import create_connectivity_graph
+from typing import Tuple
 np_str_obj_array_pattern = re.compile(r'[SaUO]')
 string_classes = (str, bytes)
 
@@ -251,3 +252,39 @@ def d_collate_fn(batch):
             return [d_collate_fn(samples) for samples in transposed]
 
         raise #TypeError(default_collate_err_msg_format.format(elem_type))
+
+
+def prepare_data_for_gat(data: dict, device: str) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Prepare data for GAT model.
+
+    :param data: dict of data
+    :param device: device to use
+    :return: tuple of (states, graph)
+    """
+    # from data get "state\type" with shape bs, 1
+
+    state_type = data['state/type']
+    bs = state_type.shape[0]
+    # state_type shape bs, 1
+    # from data get "state\current\x" and "state\current\y" and cat them
+    state_cur = torch.cat([data["state/current/x"].unsqueeze(-1), data["state/current/y"].unsqueeze(-1)], dim=-1)
+    # state_cur shape is (batch_size, 2*state_size)
+    # unsqueeze to be able to concatenate with state_past
+    state_cur = state_cur.unsqueeze(2)
+    # from data get "state\past\x" and "state\past\y" and cat them
+    state_past = torch.cat([data["state/past/x"].reshape(bs, -1, 10, 1), data["state/past/y"].reshape(bs, -1, 10, 1)], dim=-1)
+    # state_past shape is (batch_size, num_obs, 2*state_size)
+    # cat cur and past states
+    state = torch.cat([state_cur, state_past], dim=2)
+    # state_type unsqueeze and repeat to cat with state
+    state_type = state_type.unsqueeze(2).repeat(1, 1, state.size(2)).unsqueeze(-1)
+    # state_type shape is (batch_size, num_obs, 1)
+    # cat state and state_type
+    state = torch.cat([state, state_type], dim=-1)
+    # state shape is (batch_size, num_obs, 2*state_size+1)
+    state = state.reshape(bs, state.shape[1], -1)
+    graph = create_connectivity_graph(state)
+    return state.to(device), graph.to(device)
+
+
