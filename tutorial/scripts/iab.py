@@ -5,6 +5,7 @@ import torch.distributions as D
 from scripts.pointNet import PointNetfeat
 from scripts.rgb_loader import RgbLoader
 from scripts.GAT import GAT
+from scripts.dataloaders import preprocess_batch
 import torchvision.models as models
 
 def get_n_params(model):
@@ -472,7 +473,8 @@ class AttPredictorPecNetGat(nn.Module):
         self.decoder_goals = DecoderGoals(embed_dim, 12, out_modes, dr_rate=dr_rate, use_recurrent=use_rec)
         self.decoder_trajs = DecoderTraj3(embed_dim, 12, out_modes, out_dim, out_horiz, dr_rate, use_recurrent=use_rec)
 
-    def forward(self, batch_unpacked):
+    def forward(self, data):
+        batch_unpacked = preprocess_batch(data, self.use_points, self.use_vis, use_gat=1)
         masks, rot_mat, rot_mat_inv, state_masked, xyz_personal, maps, gat_states, graph = batch_unpacked
         # if use_gat
         n_att = None

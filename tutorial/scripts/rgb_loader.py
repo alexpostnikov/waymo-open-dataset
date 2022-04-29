@@ -73,9 +73,9 @@ class RgbLoader():
             max_len = max(rgb.shape[0], max_len)
             out.append(rgb)
         # form out tensor with shape (multy_batch, max_len, rgb.shape[1], rgb.shape[2], rgb.shape[3])
-        out_tensor = torch.zeros(multy_batch, max_len, out[0][0].shape[1], out[0][0].shape[2], out[0][0].shape[3])
+        out_tensor = torch.zeros(multy_batch, max_len, out[0].shape[1], out[0].shape[2], out[0].shape[3])
         for i, rgb in enumerate(out):
-            out_tensor[i, :rgb.shape[0]] = rgb
+            out_tensor[i, :rgb.shape[0]] = torch.tensor(rgb)
         return out_tensor
 
 
