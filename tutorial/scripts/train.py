@@ -132,12 +132,12 @@ def train_epoch(epoch, logger, model, optimizer, train_loader, use_every_nth_pre
     pbar = tqdm(train_loader)
     for chank, data in enumerate(pbar):
         optimizer.zero_grad()
-        data = split_dict_of_tensors_by_num_gpus(data)
+        data_splited = split_dict_of_tensors_by_num_gpus(data)
 
         if rgb_loader is not None:
-            data["rgbs"] = rgb_loader.load_multybatch_rgb(data, prefix="")#.astype(np.float32))
-        poses, confs, goals_local, rot_mat, rot_mat_inv = model(data)
-        mask = data["state/tracks_to_predict"]
+            data_splited["rgbs"] = rgb_loader.load_multybatch_rgb(data_splited, prefix="")#.astype(np.float32))
+        poses, confs, goals_local, rot_mat, rot_mat_inv = model(data_splited)
+        mask = data["state/tracks_to_predict"].reshape(-1, 128)
         valid = data["state/future/valid"].reshape(-1, 128, 80)[mask > 0].to(poses.device)[:,
                 use_every_nth_prediction - 1::use_every_nth_prediction]
         fut_path = get_future(data).to(poses.device).permute(0, 2, 1, 3)[mask > 0]
@@ -397,21 +397,33 @@ def split_dict_of_tensors_by_num_gpus(data):
     :return:
     '''
     num_gpus = torch.cuda.device_count()
-    for k, v in data.items():
-        data[k] = split_tensor_by_num_gpus(v, num_gpus)
-    return data
+    new_data = {}
+    for k, v in data.items():            
+        new_data[k] = split_tensor_by_num_gpus(v, num_gpus)
+    return new_data
 
 
 
 
 def split_tensor_by_num_gpus(data, num_gpus):
-    data_split = torch.split(data, np.ceil(data.size(0) / num_gpus).astype(np.int32).item(), dim=0)
-    # stack masks
-    data_t_split_t = torch.stack(data_split[:-1], dim=0)
-    a = torch.zeros_like(data_split[0])
-    a[:data_split[-1].shape[0]] = data_split[-1]
-    data_t_split_t = torch.cat([data_t_split_t, a.unsqueeze(0)], dim=0)
-    return data_t_split_t
-
-
-
+    if isinstance(data, list):
+        # print(f"len list {len(data)}")
+        num_batches = np.ceil( len(data) / num_gpus).astype(np.int32).item()
+        data_t_split_t = []
+        for i in range(num_gpus-1):
+            data_t_split_t.append(data[i*num_batches: (i+1)*num_batches])
+        data_t_split_t.append(data[(num_gpus-1)*num_batches:])
+        
+        # for i in range(num_gpus):
+        #     print (len(data_t_split_t[i]))
+        return data_t_split_t
+    else:
+        data_split = torch.split(data, np.ceil(len(data) / num_gpus).astype(np.int32).item(), dim=0)
+    
+        
+        # stack masks
+        data_t_split_t = torch.stack(data_split[:-1], dim=0)
+        a = torch.zeros_like(data_split[0])
+        a[:data_split[-1].shape[0]] = data_split[-1]
+        data_t_split_t = torch.cat([data_t_split_t, a.unsqueeze(0)], dim=0)
+        return data_t_split_t
