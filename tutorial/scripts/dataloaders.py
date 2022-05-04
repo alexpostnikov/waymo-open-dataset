@@ -308,6 +308,8 @@ def create_rot_matrix(state_masked, bbox_yaw=None):
 def preprocess_batch(data, use_points=False, use_vis=False, use_gat=False):
     # for key val in data assert first dim is 1:
     for key, val in data.items():
+        if isinstance(val, list):
+            continue
         data[key] = val.squeeze(0)
 
     bs = data["state/tracks_to_predict"].shape[0]
