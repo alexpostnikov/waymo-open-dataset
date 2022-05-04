@@ -99,8 +99,7 @@ class NeighbAttention(nn.Module):
         self.v_mlp = nn.Linear(inp_dim, embed_dim + pose_emb_dim)
         self.layer_norm = nn.LayerNorm(embed_dim + pose_emb_dim)
 
-    def forward(self, neighb_h, x):
-
+    def forward(self, neighb_h, x): 
         neighb_h = neighb_h.unsqueeze(1)
         value = self.v_mlp(neighb_h).permute(1, 0, 2)
         key = self.k_mlp(neighb_h).permute(1, 0, 2)
@@ -185,11 +184,15 @@ class VisualAttentionTransformer(nn.Module):
         return agent_h
 
     def forward(self, resnet_out, agent_h, masking=0):
+        # print(f"in nh: {resnet_out.shape}, x: {agent_h.shape}")
+        
         value = self.v_mlp(resnet_out).unsqueeze(1).permute(1, 0, 2)
         key = self.k_mlp(resnet_out).unsqueeze(1).permute(1, 0, 2)
         query = self.q_mlp(agent_h).permute(1, 0, 2)
+        # print(f"query {query.shape },   key {key.shape},   value {value.shape}")
         out, _ = self.att(query, key, value)
         out = self.layer_norm(out.permute(1, 0, 2))
+        
         return out
 
 
@@ -476,7 +479,7 @@ class AttPredictorPecNetGat(nn.Module):
     def forward(self, data):
         batch_unpacked = preprocess_batch(data, self.use_points, self.use_vis, use_gat=1)
         masks, rot_mat, rot_mat_inv, state_masked, xyz_personal, maps, gat_states, graph = batch_unpacked
-        # if use_gat
+        maps = maps[:state_masked.shape[0]]
         n_att = None
         if self.use_gat:
             gse = self.embeder_gat(gat_states)
