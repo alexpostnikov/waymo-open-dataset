@@ -1,4 +1,5 @@
 import numpy as np
+
 from tqdm import tqdm
 import pickle
 import pathlib
@@ -32,7 +33,7 @@ import pathlib
 import torch
 
 
-class WaymoDataset(torch.utils.data.IterableDataset):
+class WaymoDataset(torch.utils.data.Dataset):
     def __init__(self, ds_path: str, index_file: str):
         self.ds_path = ds_path
         # assert self.ds_path.exists()
@@ -71,5 +72,14 @@ if __name__ == "__main__":
     index_file = pathlib.Path(ds_path) / index_file
     # join the path with the index file
     ds = WaymoDataset(ds_path, index_file)
-    for i in tqdm(ds):
-        pass
+    for i in tqdm(range(len(ds))):
+        data = ds[i]
+    from scripts.dataloaders import d_collate_fn
+    from scripts.rgb_loader import RgbLoader
+
+    rgb_loader = RgbLoader("/media/robot/hdd1/waymo_ds/rendered04may/rendered/train/index.pkl")
+    loader = torch.utils.data.DataLoader(ds, batch_size=4,
+                                              num_workers=0, collate_fn=d_collate_fn)
+    # use tqdm to iterate over the loader
+    for i, data in tqdm(enumerate(loader)):
+        rgb = rgb_loader.load_batch_rgb(data, prefix="/media/robot/hdd1/waymo_ds/rendered04may/")
