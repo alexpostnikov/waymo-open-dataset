@@ -7,8 +7,7 @@ import pickle
 import pathlib
 
 
-train_data_path = "/media/robot/hdd1/waymo_ds/training/"
-files = glob.glob(train_data_path + "*")
+
 
 '''
 1 file ~ 480 records
@@ -24,8 +23,10 @@ save batches to disk and save index file to disk
 for each file in files create loader and save data to disk
 '''
 
+train_data_path = "/home/jovyan/uncompressed/tf_example/training/"
+files = glob.glob(train_data_path + "*")
 
-ds_path = "/media/robot/hdd1/waymo_ds"
+ds_path = "/home/jovyan/uncompressed/tf_example"
 # check that ds_path exists
 assert pathlib.Path(ds_path).exists()
 
@@ -35,8 +36,8 @@ path_npz_files = "training_mapstyle/npz_files"
 
 index_path = pathlib.Path(ds_path) / index_path
 # check that index_path exists if not create it
-if not index_path.exists():
-    index_path.mkdir(parents=True)
+# if not index_path.exists():
+#     index_path.mkdir(parents=True)
 
 path_npz_files = pathlib.Path(ds_path) / path_npz_files
 # check that path_npz_files exists if not create it
@@ -50,8 +51,8 @@ indexes = {}
 global_index = 0
 for fn, file in enumerate(tqdm(files)):
     # stop after second file
-    # if fn > 10:
-    #     break
+    # if fn > 30:
+        # break
 
     holder = {}
     loader = tfrecord.tfrecord_loader(file, None, context_description)
@@ -74,5 +75,5 @@ for fn, file in enumerate(tqdm(files)):
 # save index file
 
 # save index file with pickle
-with open(index_path, "ab") as f:
+with open(index_path, "wb") as f:
     pickle.dump(indexes, f)
