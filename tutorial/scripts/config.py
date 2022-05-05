@@ -65,6 +65,10 @@ def build_parser():
     ###########################################################################
     # #### Experiment #########################################################
     ###########################################################################
+    parser.add_argument(
+        '--exp_project_name', type=str, default="test",
+        help=f'Specify an explicit name for the experiment - otherwise we '
+             f'generate a unique wandb ID.')
 
     parser.add_argument(
         '--exp_name', type=str, default=None,

@@ -40,11 +40,12 @@ wandb.config = {
 batch_size = config.exp_batch_size
 
 train_tfrecord_path = os.path.join(config.dir_data, "training/training_tfexample.*-of-01000")
-test_path = os.path.join(config.dir_data, "validation/validation_tfexample.tfrecord-*-of-00150")
 train_dataset = CustomImageDataset(train_tfrecord_path, context_description)
-test_dataset = CustomImageDataset(test_path, context_description)
 train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size,
                                            num_workers=config.exp_num_workers, collate_fn=d_collate_fn)
+
+test_path = os.path.join(config.dir_data, "validation/validation_tfexample.tfrecord-*-of-00150")
+test_dataset = CustomImageDataset(test_path, context_description)
 test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size,
                                           num_workers=config.exp_num_workers, collate_fn=d_collate_fn)
 

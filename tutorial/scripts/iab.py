@@ -330,7 +330,7 @@ class DecoderTraj3(nn.Module):
         self.out_shape = out_shape
 
         self.outlayers = nn.Sequential(
-            nn.Linear(out_shape * 2 + 32, out_shape * 4),
+            nn.Linear(512, out_shape * 4),
             nn.ReLU(),
 
             nn.Linear(out_shape * 4, out_shape * 2),
@@ -341,30 +341,25 @@ class DecoderTraj3(nn.Module):
         )
         # self.att = nn.MultiheadAttention(out_shape * 2, out_modes, dropout=0.)
 
-        self.encoder_layer = nn.TransformerEncoderLayer(d_model=out_shape * 2 + 32, nhead=4)
+        self.encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=4)
         self.transformer_encoder = nn.TransformerEncoder(self.encoder_layer, num_layers=2)
 
-        self.q_mlp = nn.Linear(inp_dim + inp_dim//2 + 16, out_shape * 2)
+        self.q_mlp = nn.Linear((inp_dim + 16) + inp_dim//2 + 32, 512)
 
         self.conf_mlp = nn.Sequential(nn.Linear(self.out_shape, self.out_shape * 2), nn.ReLU(),
                                       nn.Linear(self.out_shape * 2, 1))
         self.traj_mlp = nn.Sequential(nn.Linear(self.out_shape - self.out_modes, out_shape * 2 ), nn.ReLU(),
                                       nn.Linear(out_shape * 2, self.out_dim * out_horiz))
         self.use_recurrent = use_recurrent
-#         if use_recurrent:
-#             self.conf_mlp = nn.Sequential(nn.Linear(out_shape - self.out_modes, self.out_modes), nn.ReLU(),
-#                                           nn.Linear(self.out_modes, self.out_modes))
-
-#             self.rec = nn.GRU(out_shape * 2 + 32, out_dim * out_horiz)
-#             self.singl_mode = nn.GRU(2, 2)
 
     def forward(self, hist_enc, goal):
         bs = hist_enc.shape[0]
         goal_embedded = self.goal_embeder(goal.reshape(bs, -1, 2))
         inp = torch.cat((hist_enc, goal_embedded), dim=2)
-        inp_q = self.q_mlp(inp)
+        inp = time_encoding_sin(inp, added_emb_dim=32)
+        agent_h_te = self.q_mlp(inp)
 
-        agent_h_te = time_encoding_sin(inp_q, added_emb_dim=32)
+
         predictions = self.transformer_encoder(agent_h_te.permute(1, 0, 2)).permute(1, 0, 2)
         predictions = self.outlayers(predictions)
         confidences = torch.softmax(self.conf_mlp(predictions).reshape(bs, self.out_modes), dim=-1)
