@@ -18,12 +18,12 @@ wandb.config = {
 model = AttPredictorPecNetWithTypeD3(config=config, wandb_logger=wandb)
 lr_monitor = LearningRateMonitor(logging_interval='step')
 
-trainer = Trainer(overfit_batches=1, accelerator="gpu")
-trainer.fit(model)
-trainer = Trainer(accelerator="gpu", callbacks=[lr_monitor])
+# trainer = Trainer(overfit_batches=2, accelerator="gpu", max_epochs=100, devices=1)#, num_sanity_val_steps=0 
+# trainer.fit(model)
+trainer = Trainer(accelerator="gpu", callbacks=[lr_monitor], max_epochs=10, devices=1)#, num_sanity_val_steps=0
 
 # call tune to find the lr
-trainer.tune(model)
+# trainer.tune(model)
 trainer.fit(model)
 # trainer = Trainer(devices=2, accelerator="gpu")
 # trainer = Trainer(accelerator="gpu", callbacks=[lr_monitor])
