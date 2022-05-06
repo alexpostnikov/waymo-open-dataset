@@ -25,12 +25,12 @@ def build_parser():
         help='Directory where SDC data is stored. We also use this to cache '
              'torch hub models.')
     parser.add_argument(
-        '--train_index_path', type=str, default='./rendered/train/index.pkl',
+        '--train_index_path', type=str, default='/home/jovyan/rendered/train/index.pkl',
         help='Directory where SDC data is stored. We also use this to cache '
              'torch hub models.')
 
     parser.add_argument(
-        '--test_index_path', type=str, default='./rendered/val/index.pkl',
+        '--val_index_path', type=str, default='/home/jovyan/rendered/val/index.pkl',
         help='Directory where SDC data is stored. We also use this to cache '
              'torch hub models.')
 
