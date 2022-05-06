@@ -4,10 +4,10 @@ from tqdm import tqdm
 import pickle
 import pathlib
 import torch
-
+from scripts.rgb_loader import RgbLoader
 
 class WaymoDataset(torch.utils.data.Dataset):
-    def __init__(self, ds_path: str, index_file: str):
+    def __init__(self, ds_path: str, index_file: str, rgb_index_path: str = None, rgb_prefix: str = ""):
         self.ds_path = ds_path
         # assert self.ds_path.exists()
         assert pathlib.Path(self.ds_path).exists()
@@ -17,6 +17,12 @@ class WaymoDataset(torch.utils.data.Dataset):
         self.read_files = {}
         with open(index_file, 'rb') as f:
             self.index = pickle.load(f)
+        self.rgb_index_path = rgb_index_path
+        if rgb_index_path is not None:
+            assert pathlib.Path(rgb_index_path).exists()
+            self.rgb_prefix = rgb_prefix
+            self.rgb_loader = RgbLoader(rgb_index_path)
+
 
     def __getitem__(self, item):
         path = self.index[item][0]
@@ -39,7 +45,11 @@ class WaymoDataset(torch.utils.data.Dataset):
             self.read_files[path] = new_data
         else:
             data = self.read_files[path]
+
         chunk = data[frame_idx]
+        if self.rgb_index_path:
+            chunk["rgbs"] = torch.tensor(
+                self.rgb_loader.load_singlebatch_rgb(chunk, prefix=self.rgb_prefix).astype(np.float32))
         chunk["file"] = path
         if len(self.read_files)>100:
             self.read_files.clear()

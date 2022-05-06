@@ -7,30 +7,11 @@ import logging
 
 class RgbLoader():
     def __init__(self, index_path="rendered/index.pkl"):
-        # logging.basicConfig(filename='example.log', filemode='w', level=logging.DEBUG)
-        # logging.info('------------------Started------------------')
-
         self.index_path = index_path
         self.index_dict = self.load_dict()
         self.opened_files = {}
         self.rgbs = {}
 
-#     def load_dict(self, filename_=None):
-#         if filename_ is None:
-#             filename_ = self.index_path
-
-#         out_d = {}
-#         with open(filename_, 'rb') as f:
-#             try:
-#                 lim = 1e4
-#                 while 1 and lim > 0:
-#                     lim -= 1
-#                     loaded_dict = pickle.load(f)
-#                     out_d = {**out_d, **loaded_dict}
-#             except EOFError:
-#                 pass
-#         return out_d
-    
     def load_dict(self, filename_=None):
         if filename_ is None:
             filename_ = self.index_path
@@ -48,7 +29,7 @@ class RgbLoader():
                     
             except EOFError:
                 pass
-        d = {k:v for e in dicts for (k,v) in e.items()}
+        d = {k: v for e in dicts for (k, v) in e.items()}
         print(f"loaded index file contains {1e5-lim} indexes to files")
         return d
 
@@ -74,6 +55,32 @@ class RgbLoader():
             num_nonzero_in_each_batch = (mask.nonzero()[:, 0] == bn).sum()
             [scenarios_id.append(scenario) for _ in range(num_nonzero_in_each_batch)]
         
+        aids = data["state/id"][mask]
+        names = [scenarios_id[i] + str(aids[i].item()) for i in range(len(aids))]
+        # logging.info(f'----load_batch_rgb() names = {names}')
+        files = [self.index_dict[name] for name in names]
+        file_name_index = self.namefile_to_file_name_index(names, files)
+        batch_rgb = np.ones((len(aids), 224, 224, 3), dtype=np.float32)
+        for file, name_index in file_name_index.items():
+            indexes = [ni[1] for ni in name_index]
+            # logging.info(f' --------load_batch_rgb() name_index = {name_index}, prefix= {prefix}')
+            batch_rgb[indexes] = self.load_rgb_by_name_file(name_index, file, prefix)
+        return batch_rgb
+
+    def load_singlebatch_rgb(self, data, prefix="tutorial/"):
+        batch = data['scenario/id']
+        try:
+            scenario_ids = "".join(([sc.tobytes().decode("utf-8") for sc in batch]))
+        except:
+            scenario_ids = batch
+        # logging.info(f'----load_batch_rgb() scenario_ids = {scenario_ids}')
+        mask = (data["state/tracks_to_predict"] > 0)
+        # repeat scenario_ids number of nonzero elements to predict
+        scenarios_id = [scenario_ids for i in range(len(mask.nonzero()[0]))]
+        # for bn, scenario in enumerate(scenario_ids):
+        #     num_nonzero_in_each_batch = (mask.nonzero()[:, 0] == bn).sum()
+        #     [scenarios_id.append(scenario) for _ in range(num_nonzero_in_each_batch)]
+
         aids = data["state/id"][mask]
         names = [scenarios_id[i] + str(aids[i].item()) for i in range(len(aids))]
         # logging.info(f'----load_batch_rgb() names = {names}')
