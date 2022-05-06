@@ -11,6 +11,8 @@ import math
 from torch.optim.lr_scheduler import LambdaLR
 from scripts.train import preprocess_batch, get_future, log_likelihood
 from scripts.rgb_loader import RgbLoader
+import pathlib
+from read_map_ds import WaymoDataset
 
 def get_cosine_with_hard_restarts_schedule_with_warmup_with_min(
         optimizer: torch.optim.Optimizer, num_warmup_steps: int, num_training_steps: int, num_cycles: int = 1, last_epoch: int = -1,
@@ -68,7 +70,8 @@ class AttPredictorPecNetWithTypeD3(pl.LightningModule):
         dr_rate = 0.1
         out_dim = 2
         out_horiz = 80
-        self.rgb_loader = RgbLoader(config.train_index_path)
+        self.tr_rgb_loader = RgbLoader(config.train_index_path)
+        self.val_rgb_loader = RgbLoader(config.val_index_path)
         self.latent = nn.Parameter(torch.rand(out_modes, embed_dim + 16), requires_grad=True)
         self.embeder = InitEmbedding(inp_dim=5, out_dim=embed_dim, use_recurrent=use_rec)
         self.encoder = Encoder(inp_dim, embed_dim, num_blocks, use_vis=use_vis, use_points=use_points, dr_rate=dr_rate)
@@ -137,7 +140,7 @@ class AttPredictorPecNetWithTypeD3(pl.LightningModule):
         # todo from config
         use_every_nth_prediction = 1
         if self.use_vis:
-            batch["rgbs"] = torch.tensor(self.rgb_loader.load_batch_rgb(batch, prefix="").astype(np.float32))
+            batch["rgbs"] = torch.tensor(self.tr_rgb_loader.load_batch_rgb(batch, prefix="/home/jovyan/").astype(np.float32)).to(self.device)
 
         batch_unpacked = preprocess_batch(batch, self.use_points, self.use_vis)
 
@@ -196,8 +199,10 @@ class AttPredictorPecNetWithTypeD3(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         use_every_nth_prediction = 1
-        batch["rgbs"] = torch.tensor(self.rgb_loader.load_batch_rgb(batch, prefix="").astype(np.float32))
-
+        try:
+            batch["rgbs"] = torch.tensor(self.val_rgb_loader.load_batch_rgb(batch, prefix="/home/jovyan/").astype(np.float32)).to(self.device)
+        except:
+            batch["rgbs"] = torch.tensor(self.tr_rgb_loader.load_batch_rgb(batch, prefix="/home/jovyan/").astype(np.float32)).to(self.device)
         batch_unpacked = preprocess_batch(batch, self.use_points, self.use_vis)
 
         poses, confs, goals_local, rot_mat, rot_mat_inv = self(batch_unpacked)
@@ -225,20 +230,39 @@ class AttPredictorPecNetWithTypeD3(pl.LightningModule):
         return pred
 
     def train_dataloader(self):
+        # ds_path = pathlib.Path("/home/jovyan/uncompressed/tf_example/")
+        ds_path = self.config.dir_data
+        assert pathlib.Path(ds_path).exists()
 
-        train_tfrecord_path = os.path.join(self.config.dir_data, "training/training_tfexample.*-of-01000")
-        train_dataset = CustomImageDataset(train_tfrecord_path, context_description)
+        index_file = "training_mapstyle/index_file.txt"
+        # join
+        index_file = pathlib.Path(ds_path) / index_file
+        # join the path with the index file
+        train_dataset = WaymoDataset(ds_path, index_file)
+
+        
+        # train_tfrecord_path = os.path.join(self.config.dir_data, "training/training_tfexample.*-of-01000")
+        # train_dataset = CustomImageDataset(train_tfrecord_path, context_description)
         train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=self.batch_size,
                                                    num_workers=self.config.exp_num_workers, collate_fn=d_collate_fn)
+        print("train_loader done")
         return train_loader
 
     def val_dataloader(self):
-        # test_path = os.path.join(self.config.dir_data, "validation/validation_tfexample.tfrecord-*-of-00150")
-        # test_dataset = CustomImageDataset(test_path, context_description)
-        # test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=self.config.exp_batch_size,
-        #                                           num_workers=self.config.exp_num_workers, collate_fn=d_collate_fn)
+        ds_path = self.config.dir_data
+        index_file = "val_mapstyle/index_file.txt"
+        # join
+        index_file = pathlib.Path(ds_path) / index_file
+        # join the path with the index file
+        val_dataset = WaymoDataset(ds_path, index_file)
 
-        return None
+        
+        # train_tfrecord_path = os.path.join(self.config.dir_data, "training/training_tfexample.*-of-01000")
+        # train_dataset = CustomImageDataset(train_tfrecord_path, context_description)
+        val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=self.batch_size,
+                                                   num_workers=self.config.exp_num_workers, collate_fn=d_collate_fn)
+        print("val_loader done")
+        return val_loader
 
     def test_dataloader(self):
         return None
