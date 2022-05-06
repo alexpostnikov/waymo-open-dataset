@@ -26,11 +26,24 @@ class WaymoDataset(torch.utils.data.Dataset):
             # join ds_path + path
             path_glob = pathlib.Path(self.ds_path) / path
             data = np.load(path_glob, allow_pickle=True)["data"].reshape(-1)[0]
-            self.read_files[path] = data
+            
+            new_data = {}
+            for key, val in data.items():
+                new_sub_d = {}
+                for vkey in data[key].keys():
+                    if "roadgraph" not in vkey:
+#                         del data[key][vkey]
+                        new_sub_d[vkey]  = data[key][vkey]
+                new_data[key] = new_sub_d
+            data = new_data
+            self.read_files[path] = new_data
         else:
             data = self.read_files[path]
         chunk = data[frame_idx]
         chunk["file"] = path
+        if len(self.read_files)>100:
+            self.read_files.clear()
+            print("clearing")
         return chunk
 
     def __len__(self):
@@ -53,12 +66,12 @@ if __name__ == "__main__":
     from scripts.rgb_loader import RgbLoader
 
     rgb_loader = RgbLoader("/home/jovyan/rendered/train/index.pkl")
-    loader = torch.utils.data.DataLoader(ds, batch_size=1, shuffle=0,
-                                              num_workers=0, collate_fn=d_collate_fn)
+    loader = torch.utils.data.DataLoader(ds, batch_size=64, shuffle=0,
+                                              num_workers=12, collate_fn=d_collate_fn)
     # use tqdm to iterate over the loader
     good = 0
     bad = 0
-    for i, data in tqdm(enumerate(loader)):
+    for i, data in tqdm(enumerate(loader),total=len(loader)):
         try:
             rgb = rgb_loader.load_batch_rgb(data, prefix="/home/jovyan/")
             good+=1

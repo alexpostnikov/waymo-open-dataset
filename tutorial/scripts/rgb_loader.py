@@ -89,12 +89,13 @@ class RgbLoader():
     def load_rgb_by_name_file(self, name_index, file_path, prefix="tutorial/"):
         if file_path not in self.opened_files:
             # logging.info(f'----file_path: {prefix + file_path}')
-            self.rgbs = {**self.rgbs, **np.load(prefix + file_path, allow_pickle=True)["rgb"].reshape(-1)[0]}
-            self.opened_files[file_path] = 1
+            rgbs = np.load(prefix + file_path, allow_pickle=True)["rgb"].reshape(-1)[0]
+            # self.rgbs = {**self.rgbs, **rgbs}
+            # self.opened_files[file_path] = 1
         out = []
         for n_i in name_index:
             # logging.info(f'--------load_rgb_by_name_file() n_i = {n_i}')
-            out.append(self.rgbs[n_i[0]])
+            out.append(rgbs[n_i[0]])
         out = np.concatenate([out])
         return out[:, 0]
 
