@@ -432,7 +432,8 @@ def preprocess_batch(data, use_points=False, use_vis=False):
             xyz_personal = torch.cat((xyz_personal, xyz_p.unsqueeze(0)), dim=0)
     if use_vis:
         try:
-            # rasters = self.rgb_loader.load_batch_rgb(data, prefix="").astype(np.float32)
+            data["rgbs"] = data["rgbs"].reshape(data["rgbs"].shape[0], -1,data["rgbs"].shape[3], data["rgbs"].shape[4], data["rgbs"].shape[5])
+            data["rgbs"] = data["rgbs"][masks.nonzero(as_tuple=True)]
             maps = data["rgbs"].permute(0, 3, 1, 2) / 255.
         except KeyError as e:
             raise e

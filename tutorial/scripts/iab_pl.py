@@ -70,8 +70,8 @@ class AttPredictorPecNetWithTypeD3(pl.LightningModule):
         dr_rate = 0.1
         out_dim = 2
         out_horiz = 80
-        self.tr_rgb_loader = RgbLoader(config.train_index_path)
-        self.val_rgb_loader = RgbLoader(config.val_index_path)
+#         self.tr_rgb_loader = RgbLoader(config.train_index_path)
+#         self.val_rgb_loader = RgbLoader(config.val_index_path)
         self.latent = nn.Parameter(torch.rand(out_modes, embed_dim + 16), requires_grad=True)
         self.embeder = InitEmbedding(inp_dim=5, out_dim=embed_dim, use_recurrent=use_rec)
         self.encoder = Encoder(inp_dim, embed_dim, num_blocks, use_vis=use_vis, use_points=use_points, dr_rate=dr_rate)
@@ -139,8 +139,6 @@ class AttPredictorPecNetWithTypeD3(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         # todo from config
         use_every_nth_prediction = 1
-        if self.use_vis:
-            batch["rgbs"] = torch.tensor(self.tr_rgb_loader.load_batch_rgb(batch, prefix="/home/jovyan/").astype(np.float32)).to(self.device)
 
         batch_unpacked = preprocess_batch(batch, self.use_points, self.use_vis)
 
@@ -199,10 +197,7 @@ class AttPredictorPecNetWithTypeD3(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         use_every_nth_prediction = 1
-        try:
-            batch["rgbs"] = torch.tensor(self.val_rgb_loader.load_batch_rgb(batch, prefix="/home/jovyan/").astype(np.float32)).to(self.device)
-        except:
-            batch["rgbs"] = torch.tensor(self.tr_rgb_loader.load_batch_rgb(batch, prefix="/home/jovyan/").astype(np.float32)).to(self.device)
+    
         batch_unpacked = preprocess_batch(batch, self.use_points, self.use_vis)
 
         poses, confs, goals_local, rot_mat, rot_mat_inv = self(batch_unpacked)
@@ -238,7 +233,7 @@ class AttPredictorPecNetWithTypeD3(pl.LightningModule):
         # join
         index_file = pathlib.Path(ds_path) / index_file
         # join the path with the index file
-        train_dataset = WaymoDataset(ds_path, index_file)
+        train_dataset = WaymoDataset(ds_path, index_file, rgb_index_path="/home/jovyan/rendered/train/index.pkl", rgb_prefix="/home/jovyan/")
 
         
         # train_tfrecord_path = os.path.join(self.config.dir_data, "training/training_tfexample.*-of-01000")
@@ -254,7 +249,7 @@ class AttPredictorPecNetWithTypeD3(pl.LightningModule):
         # join
         index_file = pathlib.Path(ds_path) / index_file
         # join the path with the index file
-        val_dataset = WaymoDataset(ds_path, index_file)
+        val_dataset = WaymoDataset(ds_path, index_file,rgb_index_path="/home/jovyan/rendered/val/index.pkl", rgb_prefix="/home/jovyan/")
 
         
         # train_tfrecord_path = os.path.join(self.config.dir_data, "training/training_tfexample.*-of-01000")
