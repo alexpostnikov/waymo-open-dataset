@@ -23,15 +23,15 @@ save batches to disk and save index file to disk
 for each file in files create loader and save data to disk
 '''
 
-train_data_path = "/home/jovyan/uncompressed/tf_example/training/"
+train_data_path = "/home/jovyan/uncompressed/tf_example/validation/"
 files = glob.glob(train_data_path + "*")
 
 ds_path = "/home/jovyan/uncompressed/tf_example"
 # check that ds_path exists
 assert pathlib.Path(ds_path).exists()
 
-index_path = "training_mapstyle/index_file.txt"
-path_npz_files = "training_mapstyle/npz_files"
+index_path = "val_mapstyle/index_file.txt"
+path_npz_files = "val_mapstyle/npz_files"
 
 
 index_path = pathlib.Path(ds_path) / index_path
