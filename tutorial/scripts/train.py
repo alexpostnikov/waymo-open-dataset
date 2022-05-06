@@ -3,10 +3,11 @@ from tqdm.auto import tqdm
 import torch.nn as nn
 import numpy as np
 from einops import rearrange
-from waymo_open_dataset.protos import motion_submission_pb2
+
 
 
 def create_subm(model, loader, rgb_loader=None, out_file="file.pb"):
+    from waymo_open_dataset.protos import motion_submission_pb2
     motion_challenge_submission = motion_submission_pb2.MotionChallengeSubmission()
 
     motion_challenge_submission.account_name = "alex.postnikov@skolkovotech.ru"
