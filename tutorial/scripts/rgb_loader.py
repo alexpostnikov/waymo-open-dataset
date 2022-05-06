@@ -68,6 +68,7 @@ class RgbLoader():
         return batch_rgb
 
     def load_singlebatch_rgb(self, data, prefix="tutorial/"):
+
         batch = data['scenario/id']
         try:
             scenario_ids = "".join(([sc.tobytes().decode("utf-8") for sc in batch]))
@@ -91,18 +92,22 @@ class RgbLoader():
             indexes = [ni[1] for ni in name_index]
             # logging.info(f' --------load_batch_rgb() name_index = {name_index}, prefix= {prefix}')
             batch_rgb[indexes] = self.load_rgb_by_name_file(name_index, file, prefix)
+        if len(self.opened_files)>25:
+            self.opened_files.clear()
+            self.rgbs.clear()
         return batch_rgb
 
     def load_rgb_by_name_file(self, name_index, file_path, prefix="tutorial/"):
         if file_path not in self.opened_files:
             # logging.info(f'----file_path: {prefix + file_path}')
             rgbs = np.load(prefix + file_path, allow_pickle=True)["rgb"].reshape(-1)[0]
-            # self.rgbs = {**self.rgbs, **rgbs}
-            # self.opened_files[file_path] = 1
+            self.rgbs = {**self.rgbs, **rgbs}
+            self.opened_files[file_path] = 1
         out = []
         for n_i in name_index:
             # logging.info(f'--------load_rgb_by_name_file() n_i = {n_i}')
-            out.append(rgbs[n_i[0]])
+            out.append(self.rgbs[n_i[0]])
         out = np.concatenate([out])
+        
         return out[:, 0]
 

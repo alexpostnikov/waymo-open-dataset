@@ -48,12 +48,15 @@ class WaymoDataset(torch.utils.data.Dataset):
 
         chunk = data[frame_idx]
         if self.rgb_index_path:
-            chunk["rgbs"] = torch.tensor(
+            rgb = torch.tensor(
                 self.rgb_loader.load_singlebatch_rgb(chunk, prefix=self.rgb_prefix).astype(np.float32))
+            chunk["rgbs"] = np.zeros((8,rgb.shape[1],rgb.shape[2], rgb.shape[3]), dtype=np.float32)
+            chunk["rgbs"][:rgb.shape[0]] = rgb
+            chunk["rgbs"] = chunk["rgbs"][np.newaxis]
         chunk["file"] = path
-        if len(self.read_files)>100:
+        if len(self.read_files)>12:
             self.read_files.clear()
-            print("clearing")
+#             print("clearing")
         return chunk
 
     def __len__(self):
@@ -68,24 +71,19 @@ if __name__ == "__main__":
     # join
     index_file = pathlib.Path(ds_path) / index_file
     # join the path with the index file
-    ds = WaymoDataset(ds_path, index_file)
+    ds = WaymoDataset(ds_path, index_file, rgb_index_path="/home/jovyan/rendered/train/index.pkl", rgb_prefix="/home/jovyan/")
     print(f"len(ds): {len(ds)}")
     # for i in tqdm(range(len(ds))):
     #     data = ds[i]
     from scripts.dataloaders import d_collate_fn
     from scripts.rgb_loader import RgbLoader
 
-    rgb_loader = RgbLoader("/home/jovyan/rendered/train/index.pkl")
+#     rgb_loader = RgbLoader()
     loader = torch.utils.data.DataLoader(ds, batch_size=64, shuffle=0,
                                               num_workers=12, collate_fn=d_collate_fn)
     # use tqdm to iterate over the loader
     good = 0
     bad = 0
     for i, data in tqdm(enumerate(loader),total=len(loader)):
-        try:
-            rgb = rgb_loader.load_batch_rgb(data, prefix="/home/jovyan/")
-            good+=1
-        except Exception as e:
-            print(data["file"])
-            bad+=1
+        pass
     print(good, bad)
