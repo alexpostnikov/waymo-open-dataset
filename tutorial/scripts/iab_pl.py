@@ -105,7 +105,7 @@ class AttPredictorPecNetWithTypeD3(pl.LightningModule):
     def configure_optimizers(self):
 
         optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
-        lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1,  gamma=1.)
+        lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1,  gamma=0.96)
         # lr_scheduler = get_cosine_with_hard_restarts_schedule_with_warmup_with_min(
         #     optimizer=optimizer,
         #     num_warmup_steps=20,
@@ -205,11 +205,18 @@ class AttPredictorPecNetWithTypeD3(pl.LightningModule):
                                                              use_every_nth_prediction)
 
         loss = 0.01 * m_ade + 1 * loss_nll + 1 * loss_goals + 0.1 * m_fde
-        self.log("val_loss", loss)
-        self.log("val_m_ade", m_ade)
-        self.log("val_m_fde", m_fde)
+#         self.log("train_m_ade", m_ade, prog_bar=True)
+#         self.log("train_m_fde", m_fde, prog_bar=True)
+        self.log("val_loss", loss, prog_bar=True)
+        self.log("val_m_ade", m_ade, prog_bar=True)
+        self.log("val_m_fde", m_fde, prog_bar=True)
         self.log("val_loss_goals", loss_goals)
-        self.log("val_loss_nll", loss_nll)
+        self.log("val_loss_nll", loss_nll, prog_bar=True)
+        if self.wandb_logger:
+            self.wandb_logger.log({"val/loss": loss_nll,
+                        "val/min_ade": m_ade.item(),
+                        "val/min_fde": m_fde.item()})
+        
         return loss
 
     def test_step(self, batch, batch_idx):
