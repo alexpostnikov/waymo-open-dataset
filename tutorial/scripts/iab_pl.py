@@ -174,7 +174,10 @@ class AttPredictorPecNetWithTypeD3(pl.LightningModule):
         fut_ext = torch.cat([fut_path, torch.ones_like(fut_path[:, :, :1])], -1)
         fut_path = torch.bmm(rot_mat, fut_ext.permute(0, 2, 1)).permute(0, 2, 1)[:,
                    use_every_nth_prediction - 1::use_every_nth_prediction, :2]
-        m_ades = (torch.norm((fut_path.unsqueeze(2) - poses), dim=-1) * valid.unsqueeze(2)).mean(1).min(
+        selector = np.arange(4, 80 + 1, 5)
+        # print(poses.shape) # bs, times, modes, 2
+        # print((torch.norm((fut_path.unsqueeze(2) - poses), dim=-1)).shape)
+        m_ades = (torch.norm((fut_path.unsqueeze(2) - poses), dim=-1) * valid.unsqueeze(2))[:,selector].mean(1).min(
             -1).values.mean()
         m_fdes = (torch.norm((fut_path[:, -1].unsqueeze(1) - goals_local.reshape(-1, 6, 2)), dim=-1) * valid[:,
                                                                                                        -1].unsqueeze(
@@ -187,7 +190,7 @@ class AttPredictorPecNetWithTypeD3(pl.LightningModule):
             m_fde = torch.tensor([0.]).to(m_fdes.device)
         fut_path_masked = fut_path.unsqueeze(2) * valid.unsqueeze(2).unsqueeze(2)
         pred_masked = poses * valid.unsqueeze(2).unsqueeze(2)
-        selector = np.arange(4, 80 + 1, 5)
+        
         loss_nll = -log_likelihood(fut_path_masked[:, selector], pred_masked[:, selector], confs).mean() \
                    - 0.1 * log_likelihood(fut_path_masked, pred_masked, confs).mean()
         goals_masked = (valid.unsqueeze(2).unsqueeze(2)[:, -1] * goals_local.reshape(-1, 6, 2))
