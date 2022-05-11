@@ -158,8 +158,8 @@ class PoseAttention(nn.Module):
 
         query = self.q_mlp(x).permute(1, 0, 2)
         out, _ = self.att(query, key, value)
-        out = self.layer_norm(out)
-        return out.permute(1, 0, 2)
+        out = self.layer_norm(out.permute(1, 0, 2))
+        return out
 
 
 class SelfAttention(nn.Module):
@@ -213,8 +213,8 @@ class VisualAttentionTransformer(nn.Module):
         key = self.k_mlp(resnet_out).unsqueeze(1).permute(1, 0, 2)
         query = self.q_mlp(agent_h).permute(1, 0, 2)
         out, _ = self.att(query, key, value)
-        out = self.layer_norm(out)
-        return out.permute(1, 0, 2)
+        out = self.layer_norm(out.permute(1, 0, 2))
+        return out
 
 
 class PoseEncoderBlock(nn.Module):
