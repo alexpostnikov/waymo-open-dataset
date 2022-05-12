@@ -1,4 +1,5 @@
 from scripts.iab_pl import AttPredictorPecNetWithTypeD3
+from scripts.simple_pl import SimpleModel
 from scripts.config import build_parser
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import LearningRateMonitor
@@ -15,12 +16,14 @@ wandb.config = {
     "batch_size": config.exp_batch_size
 }
 
-model = AttPredictorPecNetWithTypeD3(config=config, wandb_logger=wandb)
+# model = AttPredictorPecNetWithTypeD3(config=config, wandb_logger=wandb)
+model = SimpleModel(config=config, wandb_logger=wandb)
+
 lr_monitor = LearningRateMonitor(logging_interval='step')
 
 # trainer = Trainer(overfit_batches=2, accelerator="gpu", max_epochs=100, devices=1)#, num_sanity_val_steps=0 
 # trainer.fit(model)
-trainer = Trainer(accelerator="gpu", callbacks=[lr_monitor], max_epochs=10, devices=-1, strategy="dp")#, num_sanity_val_steps=0
+trainer = Trainer(accelerator="gpu", callbacks=[lr_monitor], max_epochs=30, devices=-1, strategy="dp")#, num_sanity_val_steps=0
 
 # call tune to find the lr
 # trainer.tune(model)
