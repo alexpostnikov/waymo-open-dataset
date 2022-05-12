@@ -89,7 +89,9 @@ class AttPredictorPecNetWithTypeD3(pl.LightningModule):
         # pointnet embedder
         xyz_emb = None
         if self.use_points:
-            xyz_emb, _, _ = self.pointNet(xyz_personal.permute(0, 2, 1))
+            xyz_3d = torch.cat([xyz_personal.permute(0, 2, 1),
+                                torch.ones_like(xyz_personal.permute(0, 2, 1))[:, :1, :]], dim=1)
+            xyz_emb, _, _ = self.pointNet(xyz_3d)
 
         img_emb = None
         if self.use_vis:
@@ -243,7 +245,10 @@ class AttPredictorPecNetWithTypeD3(pl.LightningModule):
         # join
         index_file = pathlib.Path(ds_path) / index_file
         # join the path with the index file
-        train_dataset = WaymoDataset(ds_path, index_file, rgb_index_path="/home/jovyan/rendered/train/index.pkl", rgb_prefix="/home/jovyan/")
+        if self.use_vis:
+            train_dataset = WaymoDataset(ds_path, index_file, rgb_index_path="/home/jovyan/rendered/train/index.pkl", rgb_prefix="/home/jovyan/")
+        else:
+            train_dataset = WaymoDataset(ds_path, index_file)
 
         
         # train_tfrecord_path = os.path.join(self.config.dir_data, "training/training_tfexample.*-of-01000")
@@ -254,14 +259,19 @@ class AttPredictorPecNetWithTypeD3(pl.LightningModule):
         return train_loader
 
     def val_dataloader(self):
+        # return None
         ds_path = self.config.dir_data
         index_file = "val_mapstyle/index_file.txt"
         # join
         index_file = pathlib.Path(ds_path) / index_file
         # join the path with the index file
-        val_dataset = WaymoDataset(ds_path, index_file,rgb_index_path="/home/jovyan/rendered/val/index.pkl", rgb_prefix="/home/jovyan/")
 
-        
+        if self.use_vis:
+            val_dataset = WaymoDataset(ds_path, index_file, rgb_index_path="/home/jovyan/rendered/val/index.pkl",
+                                       rgb_prefix="/home/jovyan/")
+        else:
+            val_dataset = WaymoDataset(ds_path, index_file)
+
         # train_tfrecord_path = os.path.join(self.config.dir_data, "training/training_tfexample.*-of-01000")
         # train_dataset = CustomImageDataset(train_tfrecord_path, context_description)
         val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=self.batch_size,
