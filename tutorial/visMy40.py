@@ -1,5 +1,8 @@
 import sys
 from pathlib import Path
+import glob
+import pickle
+import multiprocessing
 
 sys.path.append(str(Path.cwd().parent))
 # import tensorflow as tf
@@ -44,6 +47,7 @@ class Config:
         self.exp_batch_size = 1
         self.dir_data = "/home/jovyan/uncompressed/tf_example"
         self.exp_num_workers = 0
+
 config = Config()
 
 # model = AttPredictorPecNetWithTypeD3(config=config, wandb_logger=None)
@@ -60,7 +64,7 @@ train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=config.exp_
                                            num_workers=config.exp_num_workers, collate_fn=d_collate_fn)
 
 
-size_pixels=224
+size_pixels = 224
 import uuid
 def fig_canvas_image(fig):
     """Returns a [H, W, 3] uint8 np.array image from fig.canvas.tostring_rgb()."""
@@ -102,35 +106,27 @@ def plot_scene_my(data, ag_id):
                         [np.sin(yaw), np.cos(yaw)],
                     ]
                 )
-    hist = np.stack([data['state/past/x'].reshape(128,10), data['state/past/y'].reshape(128,10)], axis=-1)
+    hist = np.stack([data['state/past/x'].reshape(128, 10), data['state/past/y'].reshape(128,10)], axis=-1)
     cur = np.stack([data['state/current/x'].reshape(128), data['state/current/y'].reshape(128)], -1)
     state = np.concatenate([hist, cur.reshape(128,1,2)], 1)
     state = np.flip(state, 1)
-    #fut = np.stack([data['state/future/x'].reshape(128,80)[ag_id], data['state/future/y'].reshape(128,80)[ag_id]], axis=-1)
     hist_start = state[ag_id][0]
     pix_to_m = 224 / 40
     shift_meters = np.array([224//6, 224//2])
     is_valid = np.concatenate([data['state/past/valid'].reshape(128,10), data['state/current/valid'].reshape(128,1)], -1)
     is_valid = np.flip(is_valid, 1)
-    is_fut = data['state/future/valid'].reshape(128,80)[ag_id]#.reshape(80,1)
     
     agent_is_valid = is_valid[ag_id]#.reshape(11,1)
     hist_img = ((state[ag_id] - hist_start)[agent_is_valid>0])  @ rot_matrix * pix_to_m + shift_meters
-    # fut_img = ((fut - hist_start)[is_fut>0]) @ rot_matrix * pix_to_m + shift_meters
-    
-    xy_lines = (data["roadgraph_samples/xyz"].reshape(20000, 3)[:,:2]  - hist_start) @ rot_matrix * pix_to_m + shift_meters
+    xy_lines = (data["roadgraph_samples/xyz"].reshape(20000, 3)[:, :2] - hist_start) @ rot_matrix * pix_to_m + shift_meters
     others_img = (state - hist_start) @ rot_matrix * pix_to_m + shift_meters
     
     
     for i in range(11):
         ax.plot(others_img[:, i, 0], others_img[:,i, 1], "*g", markersize=4-(i*0.3),  alpha= 1 - i/20)
-    
-#     print(((state[ag_id] - hist_start))  @ rot_matrix * pix_to_m + shift_meters)
-    
-    for i in range(len(hist_img)-1):
-        ax.plot(hist_img[:i+2,0][i:], hist_img[:i+2:,1][i:], "b", linewidth=6,  alpha=1 - i/13)
-    # ax.plot(fut_img[:,0], fut_img[:,1], "r")
 
+    for i in range(len(hist_img)-1):
+        ax.plot(hist_img[:i+2, 0][i:], hist_img[:i+2:, 1][i:], "b", linewidth=6,  alpha=1 - i/13)
 
     ax.plot(xy_lines[:, 0], xy_lines[:,1], "ok", markersize=2.0)
     ax.plot(xy_lines[:, 0], xy_lines[:,1], "*k", markersize=1.)
@@ -139,11 +135,6 @@ def plot_scene_my(data, ag_id):
     image = fig_canvas_image(fig)
     plt.close(fig)
     return image
-
-
-import glob
-import pickle
-import multiprocessing
 
 def create_raster(data):
                 rgb_d = {}
@@ -208,7 +199,7 @@ dls = []
 rends = []
 indexes = []
 
-for i in range(1,len(lnsp)):
+for i in range(1, len(lnsp)):
     print(math.ceil(lnsp[i-1]), math.ceil(lnsp[i]))
     ds = torch.utils.data.Subset(train_dataset, range(math.ceil(lnsp[i-1]), math.ceil(lnsp[i])))
     dl = torch.utils.data.DataLoader(ds, batch_size=config.exp_batch_size,
@@ -220,14 +211,11 @@ for i in range(1,len(lnsp)):
     dls.append(dl)
 s = 0
 
-import time
+
 def st(inp):
     rend, rgb_file_name_index = inp
-    #time.sleep(10)
     rend.save_dataset(rgb_file_name_index=rgb_file_name_index)
-    print(rgb_file_name_index)
-    # rend.save_dataset(rgb_file_name_index=rgb_file_name_index)
-    
+
 with multiprocessing.Pool(12) as p:
      result = p.map(st, zip(rends, indexes))        
 
