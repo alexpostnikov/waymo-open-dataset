@@ -413,6 +413,10 @@ def preprocess_batch(data, use_points=False, use_vis=False):
     state_masked[:, :, :2] = torch.bmm(rot_mat, state_expanded.permute(0, 2, 1).type(torch.float64)).permute(0, 2,
                                                                                                              1)[:,
                              :, :2].type(torch.float32)
+    state_valid = torch.cat([data["state/current/valid"].reshape(bs, 128, 1),
+                             torch.flip(data['state/past/valid'].reshape(bs, 128, 10), dims=[2])], -1)
+    state_valid = state_valid[masks > 0]
+    state_masked = state_masked * state_valid.unsqueeze(-1)
     rot_mat = rot_mat.type(torch.float32)
     assert ((np.linalg.norm(state_masked[:, 0, :2].cpu() - np.zeros_like(state_masked[:, 0, :2].cpu()),
                             axis=1) < 1e-4).all())
