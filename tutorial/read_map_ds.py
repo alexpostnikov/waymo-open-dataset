@@ -37,7 +37,7 @@ class WaymoDataset(torch.utils.data.Dataset):
             for key, val in data.items():
                 new_sub_d = {}
                 for vkey in data[key].keys():
-                    if "roadgraph" not in vkey:
+                    if "roadgraph123" not in vkey:
 #                         del data[key][vkey]
                         new_sub_d[vkey]  = data[key][vkey]
                 new_data[key] = new_sub_d
@@ -53,8 +53,8 @@ class WaymoDataset(torch.utils.data.Dataset):
             chunk["rgbs"] = np.zeros((8,rgb.shape[1],rgb.shape[2], rgb.shape[3]), dtype=np.float32)
             chunk["rgbs"][:rgb.shape[0]] = rgb
             chunk["rgbs"] = chunk["rgbs"][np.newaxis]
-        chunk["file"] = path
-        if len(self.read_files)>12:
+        # chunk["file"] = path
+        if len(self.read_files) > 12:
             self.read_files.clear()
 #             print("clearing")
         return chunk
