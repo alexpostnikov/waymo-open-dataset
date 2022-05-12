@@ -394,6 +394,7 @@ def preprocess_batch(data, use_points=False, use_vis=False):
     bs = data["state/tracks_to_predict"].shape[0]
     masks = data["state/tracks_to_predict"].reshape(-1, 128) > 0
     bsr = masks.sum()  # num peds to predict, bs real
+    device = data["state/tracks_to_predict"].device
     # positional embedder
     cur = torch.cat(
         [data["state/current/x"].reshape(-1, 128, 1, 1), data["state/current/y"].reshape(-1, 128, 1, 1)], -1)
@@ -405,7 +406,7 @@ def preprocess_batch(data, use_points=False, use_vis=False):
     velocities[:, :-1] = poses[:, :-1] - poses[:, 1:]
     state = torch.cat([poses, velocities], dim=-1)
     state_masked = state.reshape(bs, 128, 11, -1)[masks]
-    rot_mat = create_rot_matrix(state_masked, data["state/current/bbox_yaw"][masks])
+    rot_mat, rot2d = create_rot_matrix(state_masked, data["state/current/bbox_yaw"][masks])
     rot_mat_inv = torch.inverse(rot_mat).type(torch.float32)
     ### rotate cur state
     state_expanded = torch.cat([state_masked[:, :, :2], torch.ones_like(state_masked[:, :, :1])], -1)
@@ -421,15 +422,24 @@ def preprocess_batch(data, use_points=False, use_vis=False):
 
     xyz_personal, maps = torch.rand(bsr), torch.rand(bsr)
     if use_points:
-        xyz = data["roadgraph_samples/xyz"].reshape(bs, -1, 3)[:, ::2].cuda()
-        xyz_personal = torch.zeros([0, xyz.shape[1], xyz.shape[2]], device=xyz.device)
-        ## rotate pointclouds
-        # ...
+        xyz = data["roadgraph_samples/xyz"].reshape(bs, -1, 3)[:, ::4, :2].to(device)
+        xyz_personal = torch.zeros([bsr, xyz.shape[1], xyz.shape[2]], device=xyz.device, dtype=torch.float32)
         for i, index in enumerate(masks.nonzero()):
-            xyz_p = torch.ones([xyz.shape[1], xyz.shape[2]], device=xyz.device)
-            xyz_p[:, :2] = xyz[index[0], :, :2].clone()
-            xyz_p = (rot_mat[i] @ xyz_p.T).T
-            xyz_personal = torch.cat((xyz_personal, xyz_p.unsqueeze(0)), dim=0)
+            # print(index)
+            xyz_personal[i] = xyz[index[0], :, :]
+        # print(cur[masks].shape)
+        xyz = xyz_personal - cur[masks][:, 0:1, :2].to(device)
+        # rot mat 2d
+        rot_mat_2d = rot2d.float()  # rot_mat[:, :2, :2]
+        # rotate xyz rot_mat_2d as float32
+        xyz_rotated = torch.bmm(xyz, rot_mat_2d.to(device))
+        # calc distance to current state
+        dist = torch.norm(xyz_rotated, dim=-1)
+        # sort by distance and save top 2000
+        _, idx = torch.sort(dist, dim=-1)
+        idx = idx[:, :2000]
+
+        xyz_personal = torch.stack([xyz_rotated[i][idx[i]] for i in range(len(idx))])
     if use_vis:
         try:
             data["rgbs"] = data["rgbs"].reshape(data["rgbs"].shape[0], -1,data["rgbs"].shape[3], data["rgbs"].shape[4], data["rgbs"].shape[5])
@@ -456,4 +466,4 @@ def create_rot_matrix(state_masked, bbox_yaw=None):
     rot_mat[:, 0, 1] = -torch.sin(angles)
     rot_mat[:, 1, 0] = torch.sin(angles)
     transform = rot_mat @ T
-    return transform
+    return transform, rot_mat[:, :2, :2]
