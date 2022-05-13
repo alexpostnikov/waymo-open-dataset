@@ -119,7 +119,7 @@ class SimpleModel(pl.LightningModule):
     def configure_optimizers(self):
 
         optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
-        lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.96)
+        lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.85)
         # lr_scheduler = get_cosine_with_hard_restarts_schedule_with_warmup_with_min(
         #     optimizer=optimizer,
         #     num_warmup_steps=20,
@@ -160,7 +160,7 @@ class SimpleModel(pl.LightningModule):
         loss_goals, loss_nll, m_ade, m_fde = self.get_losses(batch, confs, goals_local, poses, rot_mat,
                                                              use_every_nth_prediction)
 
-        loss = 0.01 * m_ade + 1 * loss_nll + 1 * loss_goals + 0.1 * m_fde
+        loss = 1 * m_ade + 0.5 * loss_nll + 0.2 * loss_goals + 0.1 * m_fde
 
         # my_lr = [0]
         my_lr = self.lr_schedulers().get_last_lr()
@@ -203,8 +203,8 @@ class SimpleModel(pl.LightningModule):
         fut_path_masked = fut_path.unsqueeze(2) * valid.unsqueeze(2).unsqueeze(2)
         pred_masked = poses * valid.unsqueeze(2).unsqueeze(2)
 
-        loss_nll = -log_likelihood(fut_path_masked[:, selector], pred_masked[:, selector], confs).mean() \
-                   - 0.1 * log_likelihood(fut_path_masked, pred_masked, confs).mean()
+        speed = torch.stack([batch["state/current/velocity_x"][mask > 0], batch["state/current/velocity_x"][mask>0]], -1)
+        loss_nll = -log_likelihood(fut_path_masked[:, selector], pred_masked[:, selector], confs, vels=speed).mean()
         goals_masked = (valid.unsqueeze(2).unsqueeze(2)[:, -1] * goals_local.reshape(-1, 6, 2))
         loss_goals = -log_likelihood(fut_path_masked[:, -1:], goals_masked.unsqueeze(1), confs).mean()
         m_ade = m_ades.mean()
@@ -213,7 +213,7 @@ class SimpleModel(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         use_every_nth_prediction = 1
 
-        batch_unpacked = preprocess_batch(batch, self.use_points, self.use_vis)
+        batch_unpacked = preprocess_batch(batch, 1, self.use_vis)
 
         poses, confs, goals_local, rot_mat, rot_mat_inv = self(batch_unpacked)
         loss_goals, loss_nll, m_ade, m_fde = self.get_losses(batch, confs, goals_local, poses, rot_mat,
@@ -256,9 +256,7 @@ class SimpleModel(pl.LightningModule):
         index_file = pathlib.Path(ds_path) / index_file
         # join the path with the index file
         if self.use_vis:
-            train_dataset = WaymoDataset(ds_path, index_file,
-                                         rgb_index_path="/media/robot/hdd1/waymo_ds/rendered04may/rendered/train/index.pkl",
-                                         rgb_prefix="/media/robot/hdd1/waymo_ds/rendered04may/")
+            train_dataset = WaymoDataset(ds_path, index_file, rgb_index_path="/home/jovyan/rendered/train/index.pkl", rgb_prefix="/home/jovyan/")
         else:
             train_dataset = WaymoDataset(ds_path, index_file)
 
@@ -270,7 +268,6 @@ class SimpleModel(pl.LightningModule):
         return train_loader
 
     def val_dataloader(self):
-        return None
         ds_path = self.config.dir_data
         index_file = "val_mapstyle/index_file.txt"
         # join

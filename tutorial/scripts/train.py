@@ -301,8 +301,42 @@ def ade_loss(data, pred):
     ade = get_speed_ade_with_mask(data, pred)
     return ade.mean()
 
+def vel_to_sigma(vel, time_step=0.1, num_steps=80):
+    '''
+    create array of 2d sigmas from velocities, if
+    vel: [bs,  2] - current velocity of agent
+    '''
+    sigmas = torch.zeros(vel.shape[0], num_steps, 2, device=vel.device)
+    for i in range(num_steps):
+        # if time < 3 sec then sigma = 1.5
+        # if 3 < time < 5 sec then sigma = 2.5
+        # if 5 < time < 8 sec then sigma = 5
+        if i*time_step < 3:
+            sigmas[:, i, 0] = 1.5
+            sigmas[:, i, 1] = 1.5
+        elif 3 <= i*time_step < 5:
+            sigmas[:, i, 0] = 2.5
+            sigmas[:, i, 1] = 2.5
+        elif 5 <= i*time_step < 8:
+            sigmas[:, i, 0] = 5
+            sigmas[:, i, 1] = 5
+        else:
+            sigmas[:, i, 0] = 5
+            sigmas[:, i, 1] = 5
 
-def log_likelihood(ground_truth, predicted, weights, sigma=1.0) -> torch.Tensor:
+    # for each agent, if initial velocity is <1.4 then coefficient is 0.5
+    # if 1.4 < initial velocity < 11 then coefficient is 0.5+0.5*(vel-1.4)/
+    # if initial velocity > 11 then coefficient is 1
+    # calc total vel from 2d components
+    vel_2d = torch.sqrt(vel[:, 0]**2 + vel[:, 1]**2)
+    vel_mask = 0.5 + (0.5*(vel_2d > 1.4) * (vel_2d < 11)) * (vel_2d - 1.4) / (11 - 1.4) + (vel_2d > 11) * 0.5
+    # sigmas shape: [bs, num_steps, 2]
+    # vel_mask shape: [bs]
+    sigmas = sigmas * vel_mask.unsqueeze(1).unsqueeze(1).repeat(1, 1, 2)
+    return sigmas
+
+
+def log_likelihood(ground_truth, predicted, weights, sigma=1.0, vels=None) -> torch.Tensor:
     """Calculates log-likelihood of the ground_truth trajectory
     under the factorized gaussian mixture parametrized by predicted trajectories, weights and sigma.
     Please follow the link below for the metric formulation:
@@ -320,13 +354,19 @@ def log_likelihood(ground_truth, predicted, weights, sigma=1.0) -> torch.Tensor:
     #     assert_weights_near_one(weights)
     #     assert_weights_non_negative(weights)
     #     print(ground_truth.shape,  predicted.shape)
+    
+    if vels is not None:
+        sigma = vel_to_sigma(vels, time_step=0.5, num_steps=16)[:, :, 0]
     displacement_norms_squared = torch.sum((ground_truth - predicted) ** 2, dim=-1)
-    #     print(displacement_norms_squared)
 
     displacement_norms_squared = torch.clamp(displacement_norms_squared, max=1e6)
-    normalizing_const = np.log(2 * np.pi * sigma ** 2)
-    lse_args = torch.log(weights + 1e-6) - torch.sum(
-        normalizing_const + 0.5 * displacement_norms_squared.permute(0, 2, 1) / sigma ** 2, dim=-1)
+    normalizing_const = torch.log(2 * np.pi * torch.tensor(sigma) ** 2).to(displacement_norms_squared.device)
+    if vels is not None:
+        lse_args = torch.log(weights + 1e-6) - torch.sum(
+            normalizing_const.unsqueeze(1) + 0.5 * displacement_norms_squared.permute(0, 2, 1) / sigma.unsqueeze(1) ** 2, dim=-1)
+    else:
+        lse_args = torch.log(weights + 1e-6) - torch.sum(
+            normalizing_const + 0.5 * displacement_norms_squared.permute(0, 2, 1) / sigma ** 2, dim=-1)
     if ground_truth.ndim == 4:
         max_arg = lse_args.max(1).values.reshape(-1, 1)
     else:
@@ -401,7 +441,7 @@ def preprocess_batch(data, use_points=False, use_vis=False):
     agent_type = data["state/type"].reshape(-1, 128, 1, 1).repeat(1, 1, 11, 1)
     past = torch.cat([data["state/past/x"].reshape(-1, 128, 10, 1), data["state/past/y"].reshape(-1, 128, 10, 1)],
                      -1)  # .permute(0, 2, 1, 3)
-    poses = torch.cat([cur, torch.flip(past, dims=[2])], dim=2).reshape(bs * 128, 11, -1).cuda()
+    poses = torch.cat([cur, torch.flip(past, dims=[2])], dim=2).reshape(bs * 128, 11, -1)
     velocities = torch.zeros_like(poses)
     velocities[:, :-1] = poses[:, :-1] - poses[:, 1:]
     state = torch.cat([poses, velocities], dim=-1)
