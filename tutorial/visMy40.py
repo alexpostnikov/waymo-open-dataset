@@ -30,7 +30,7 @@ torch.manual_seed(0)
 np.random.seed(0)
 
 import os
-from scripts.iab_pl import AttPredictorPecNetWithTypeD3
+# from scripts.iab_pl import AttPredictorPecNetWithTypeD3
 from scripts.visualize import visualize_one_step_with_future, vis_cur_and_fut
 import pathlib
 from read_map_ds import WaymoDataset
@@ -57,7 +57,7 @@ assert pathlib.Path(ds_path).exists()
 
 index_file = "training_mapstyle/index_file.txt"
 index_file = pathlib.Path(ds_path) / index_file
-train_dataset = WaymoDataset(ds_path, index_file, rgb_index_path="/home/jovyan/rendered/train/index.pkl", rgb_prefix="/home/jovyan/")
+train_dataset = WaymoDataset(ds_path, index_file)
 
 
 train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=config.exp_batch_size,
@@ -137,14 +137,16 @@ def plot_scene_my(data, ag_id):
     return image
 
 def create_raster(data):
-                rgb_d = {}
+                imgs_dict = {}
+                names = []
                 for i in (data["state/tracks_to_predict"]>0).nonzero():
                     sid = data["scenario/id"].numpy().tobytes().decode("utf-8")
                     aid = data["state/id"][0][i[1]]
                     name = str(sid)+str(float(aid))
+                    names.append(name)
                     img = plot_scene_my(data, i[1])[np.newaxis]
-                    rgb_d[name] = img
-                return name, img
+                    imgs_dict[name] = img
+                return names, imgs_dict
 
 class RgbRendererMy:
     def __init__(self, index_path="renderedMy40/index.pkl", rgb_file_name_base="renderedMy40/rgb", train_loader=None):
@@ -177,13 +179,13 @@ class RgbRendererMy:
         tli = iter(train_loader)
         for data in tqdm(tli):
             file_index = rgb_file_name_base + str(rgb_file_name_index) + ".npz"            
-            name, img = create_raster(data)            
-            d = {name: file_index}
+            names, imgs_dict = create_raster(data)            
+            d = {name: file_index for name in names}
 
             index_dict = {**d, **index_dict}
 
-            rgb_holder = {**rgb_holder, **{name: img}}
-            if len(rgb_holder) >= 200:
+            rgb_holder = {**rgb_holder, **imgs_dict}
+            if len(rgb_holder) >= 30:
                 np.savez_compressed(rgb_file_name_base + str(rgb_file_name_index), rgb=rgb_holder,
                          names=np.array(list(index_dict.keys())))
                 rgb_file_name_index += 1
@@ -194,31 +196,34 @@ class RgbRendererMy:
         np.savez_compressed(rgb_file_name_base + str(rgb_file_name_index), rgb=rgb_holder, names=np.array(list(index_dict.keys())))
         return
 
-lnsp =np.linspace(start=0, stop=len(train_dataset), num=12)
-dls = []
-rends = []
-indexes = []
+if __name__ == "__main__":
+    lnsp =np.linspace(start=0, stop=len(train_dataset), num=12)
+    dls = []
+    rends = []
+    indexes = []
 
-for i in range(1, len(lnsp)):
-    print(math.ceil(lnsp[i-1]), math.ceil(lnsp[i]))
-    ds = torch.utils.data.Subset(train_dataset, range(math.ceil(lnsp[i-1]), math.ceil(lnsp[i])))
-    dl = torch.utils.data.DataLoader(ds, batch_size=config.exp_batch_size,
-                                           num_workers=config.exp_num_workers, collate_fn=d_collate_fn)
-    
-    rend = RgbRendererMy(index_path=f"renderedMy40/index+{i}.pkl", train_loader=dl) #rgb_file_name_index=
-    rends.append(rend)
-    indexes.append(i*1e7)
-    dls.append(dl)
-s = 0
+    NUM=11
+    # for i in range(1, len(lnsp)):
+    for i in range(1+NUM, 1+NUM+1):
+        print(math.ceil(lnsp[i-1]), math.ceil(lnsp[i]))
+        ds = torch.utils.data.Subset(train_dataset, range(math.ceil(lnsp[i-1]), math.ceil(lnsp[i])))
+        dl = torch.utils.data.DataLoader(ds, batch_size=config.exp_batch_size,
+                                               num_workers=config.exp_num_workers, collate_fn=d_collate_fn)
+
+        rend = RgbRendererMy(index_path=f"renderedMy40/index+{i}.pkl", train_loader=dl) #rgb_file_name_index=
+        rends.append(rend)
+        indexes.append(i*1e7)
+        dls.append(dl)
+    s = 0
 
 
-def st(inp):
-    rend, rgb_file_name_index = inp
-    rend.save_dataset(rgb_file_name_index=rgb_file_name_index)
+    def st(inp):
+        rend, rgb_file_name_index = inp
+        rend.save_dataset(rgb_file_name_index=rgb_file_name_index)
 
-with multiprocessing.Pool(12) as p:
-     result = p.map(st, zip(rends, indexes))        
-
+    # with multiprocessing.Pool(12) as p:
+    #      result = p.map(st, zip(rends, indexes))        
+    st((rends[0], indexes[0]))
 
 
 
