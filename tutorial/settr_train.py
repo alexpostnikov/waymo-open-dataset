@@ -1,4 +1,4 @@
-from scripts.settr_pl import SetTrModel
+from scripts.settrMH_pl import SetTrModel
 from scripts.config import build_parser
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import LearningRateMonitor

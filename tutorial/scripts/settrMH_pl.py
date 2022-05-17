@@ -144,7 +144,7 @@ def get_cosine_with_hard_restarts_schedule_with_warmup_with_min(
 
 
 class SetTrModel(pl.LightningModule):
-    def __init__(self, config=None, wandb_logger=None, num_heads=1):
+    def __init__(self, config=None, wandb_logger=None, num_heads=5):
         super().__init__()
         self.config = config
         self.use_vis = 1
@@ -174,7 +174,7 @@ class SetTrModel(pl.LightningModule):
                 nn.Linear(512, 512),
                 nn.ReLU(),
                 nn.Linear(512, out_modes*out_dim*80 + 6))
-            for i in range(num_heads)])
+            for _ in range(num_heads)])
         self.acnhors = torch.nn.Parameter(torch.randn(1,256))
         self.ensamblingST = SetTransformer(dim_input=(out_dim*80+1), num_outputs=out_modes, dim_output=(out_dim*80+1), num_inds=64, dim_hidden=256, num_heads=4, ln=False)
 
@@ -197,19 +197,31 @@ class SetTrModel(pl.LightningModule):
         agent_h_emb = agent_h_emb.reshape(bsr, -1)
         anchors = self.acnhors.repeat(bsr, 1)
         concat_emb = torch.cat((img_emb, agent_h_emb, xyz_emb, anchors), 1)
-        confs, predictions = [], []
-        for i in range(heads):
+        confs_l, predictions_l = [], []
+        for i in heads:
             out = self.decoder[i](concat_emb) 
             # out shape: (bsr, out_modes*out_dim*out_horiz + 6)
             out_horiz, out_dim = 80, 2
-            prediction = out[:, :-6].view(bsr, 6, out_horiz, out_dim)
+            prediction = out[:, :-6].view(bsr, 6, out_horiz, out_dim).permute(0,2,1,3)
             confidence = out[:, -6:].view(bsr, 6)
             # confidences to probabilities
-            confidence = confidence.softmax(dim=1)
-            confs.append(confidence)
-            predictions.append(prediction)
-            
-        return predictions.permute(0, 2, 1, 3), confidences, goal_vector, rot_mat, rot_mat_inv
+            confidence = confidence.softmax(dim=1) # shape: (bsr, 6)
+            confs_l.append(confidence)
+            predictions_l.append(prediction)# shape: (bsr, out_horiz, 6, out_dim)
+        # concat predictions and confidences
+        predictions = torch.cat(predictions_l, dim=2)
+        confs = torch.cat(confs_l, dim=1)
+        # flatten predictions and confidences
+        predictions = predictions.permute(0,2,1,3).reshape(bsr, -1, 160)
+        confs = confs.reshape(bsr, -1, 1)
+        # concat predictions and confidences
+        ens_inp = torch.cat((predictions, confs), dim=2)
+        ens_out = self.ensamblingST(ens_inp)
+        ens_predictions = ens_out[:, :, :-1].reshape(bsr, -1, 80, 2).permute(0,2,1,3) # bs, 80, 6, 2
+        ens_confs = ens_out[:, :, -1]
+        # make probabilites
+        ens_confs = ens_confs.softmax(dim=1)
+        return predictions_l, confs_l, (ens_predictions, ens_confs), rot_mat, rot_mat_inv
 
         # x = self.latent.unsqueeze(0).repeat(bsr, 1, 1)
         # x = self.encoder(x, img_emb, agent_h_emb, xyz_emb)
@@ -221,7 +233,7 @@ class SetTrModel(pl.LightningModule):
     def configure_optimizers(self):
 
         optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
-        lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.85)
+        lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.99)
         lr_scheduler_config = {
             "scheduler": lr_scheduler,
             "interval": "epoch",
@@ -234,13 +246,36 @@ class SetTrModel(pl.LightningModule):
         use_every_nth_prediction = 1
 
         batch_unpacked = preprocess_batch(batch, 1, 1)
-        heads = np.random.choice(5,np.random.randint(1,5), replace=False)
+        heads = np.random.choice(5, np.random.randint(1, 5), replace=False)
 
-        poses, confs, goals_local, rot_mat, rot_mat_inv = self(batch_unpacked, heads)
-        loss_goals, loss_nll, m_ade, m_fde = self.get_losses(batch, confs, goals_local, poses, rot_mat,
-                                                             use_every_nth_prediction)
-        
-        loss = 1 * m_ade + 0.5 * loss_nll + 0.2 * loss_goals + 0.1 * m_fde
+        poses, confs, ensamble, rot_mat, rot_mat_inv = self(batch_unpacked, heads)
+        loss_goals, loss_nlls, m_ades, m_fdes = [], [], [], []
+        for i in range(len(heads)):
+            loss_goal, loss_nll, m_ade, m_fde = self.get_losses(batch, confs[i], poses[i][:,-1], poses[i], rot_mat,
+                                                                 use_every_nth_prediction)
+            loss_goals.append(loss_goal)
+            loss_nlls.append(loss_nll)
+            m_ades.append(m_ade)
+            m_fdes.append(m_fde)
+            self.wandb_logger.log({f"head[{heads[i]}]/loss": loss_nll,
+                                   f"head[{heads[i]}]/min_ade": m_ade.item(),
+                                   f"head[{heads[i]}]/min_fde": m_fde.item()})
+
+        # calc mean loss
+        loss_goals = torch.stack(loss_goals).mean()
+        loss_nlls = torch.stack(loss_nlls).mean()
+        m_ades = torch.stack(m_ades).mean()
+        m_fdes = torch.stack(m_fdes).mean()
+
+        #ensemble loss:
+        ens_pred, ens_conf = ensamble
+        ens_loss_goal, ens_loss_nll, ens_m_ade, ens_m_fde = self.get_losses(batch, ens_conf, ens_pred[:, -1],
+                                                                            ens_pred, rot_mat,
+                                                                            use_every_nth_prediction)
+        self.wandb_logger.log({f"ens/loss": ens_loss_nll,
+                               f"ens/min_ade": ens_m_ade.item(),
+                               f"ens/min_fde": ens_m_fde.item()})
+        loss = 1 * m_ades + 0.5 * loss_nlls + 0.2 * loss_goals + 0.1 * m_fdes + (1 * ens_m_ade + 0.1 * ens_m_fde + 0.7 * ens_loss_nll)
 
         # my_lr = [0]
         my_lr = self.lr_schedulers().get_last_lr()
