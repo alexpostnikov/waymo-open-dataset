@@ -7,7 +7,8 @@ import torch
 from scripts.rgb_loader import RgbLoader
 
 class WaymoDataset(torch.utils.data.Dataset):
-    def __init__(self, ds_path: str, index_file: str, rgb_index_path: str = None, rgb_prefix: str = ""):
+    def __init__(self, ds_path: str, index_file: str, rgb_index_path: str = None, rgb_prefix: str = "",
+                rgb_index_path1: str = None, rgb_prefix1: str = ""):
         self.ds_path = ds_path
         # assert self.ds_path.exists()
         assert pathlib.Path(self.ds_path).exists()
@@ -22,6 +23,12 @@ class WaymoDataset(torch.utils.data.Dataset):
             assert pathlib.Path(rgb_index_path).exists()
             self.rgb_prefix = rgb_prefix
             self.rgb_loader = RgbLoader(rgb_index_path)
+        self.rgb_index_path1 = rgb_index_path1
+        if rgb_index_path1 is not None:
+            assert pathlib.Path(rgb_index_path1).exists()
+            self.rgb_prefix1 = rgb_prefix1
+            self.rgb_loader1 = RgbLoader(rgb_index_path1)
+
 
 
     def __getitem__(self, item):
@@ -53,8 +60,15 @@ class WaymoDataset(torch.utils.data.Dataset):
             chunk["rgbs"] = np.zeros((8,rgb.shape[1],rgb.shape[2], rgb.shape[3]), dtype=np.float32)
             chunk["rgbs"][:rgb.shape[0]] = rgb
             chunk["rgbs"] = chunk["rgbs"][np.newaxis]
+        if self.rgb_index_path1:
+            rgb = torch.tensor(
+                self.rgb_loader1.load_singlebatch_rgb(chunk, prefix=self.rgb_prefix1).astype(np.float32))
+            chunk["rgbsMy40"] = np.zeros((8,rgb.shape[1],rgb.shape[2], rgb.shape[3]), dtype=np.float32)
+            chunk["rgbsMy40"][:rgb.shape[0]] = rgb
+            chunk["rgbsMy40"] = chunk["rgbsMy40"][np.newaxis]
+
         # chunk["file"] = path
-        if len(self.read_files) > 12:
+        if len(self.read_files) > 2:
             self.read_files.clear()
 #             print("clearing")
         return chunk
