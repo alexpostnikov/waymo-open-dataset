@@ -496,6 +496,78 @@ def preprocess_batch(data, use_points=False, use_vis=False):
     return masks, rot_mat, rot_mat_inv, state_masked, xyz_personal, maps
 
 
+def preprocess_batch2vis(data, use_points=False, use_vis=False, use_vis2=False):
+    bs = data["state/tracks_to_predict"].shape[0]
+    masks = data["state/tracks_to_predict"].reshape(-1, 128) > 0
+    bsr = masks.sum()  # num peds to predict, bs real
+    device = data["state/tracks_to_predict"].device
+    # positional embedder
+    cur = torch.cat(
+        [data["state/current/x"].reshape(-1, 128, 1, 1), data["state/current/y"].reshape(-1, 128, 1, 1)], -1)
+    agent_type = data["state/type"].reshape(-1, 128, 1, 1).repeat(1, 1, 11, 1)
+    past = torch.cat([data["state/past/x"].reshape(-1, 128, 10, 1), data["state/past/y"].reshape(-1, 128, 10, 1)],
+                     -1)  # .permute(0, 2, 1, 3)
+    poses = torch.cat([cur, torch.flip(past, dims=[2])], dim=2).reshape(bs * 128, 11, -1)
+    velocities = torch.zeros_like(poses)
+    velocities[:, :-1] = poses[:, :-1] - poses[:, 1:]
+    state = torch.cat([poses, velocities], dim=-1)
+    state_masked = state.reshape(bs, 128, 11, -1)[masks]
+    rot_mat, rot2d = create_rot_matrix(state_masked, data["state/current/bbox_yaw"][masks])
+    rot_mat_inv = torch.inverse(rot_mat).type(torch.float32)
+    ### rotate cur state
+    state_expanded = torch.cat([state_masked[:, :, :2], torch.ones_like(state_masked[:, :, :1])], -1)
+    state_masked[:, :, :2] = torch.bmm(rot_mat, state_expanded.permute(0, 2, 1).type(torch.float64)).permute(0, 2,
+                                                                                                             1)[:,
+                             :, :2].type(torch.float32)
+    state_valid = torch.cat([data["state/current/valid"].reshape(bs, 128, 1),
+                             torch.flip(data['state/past/valid'].reshape(bs, 128, 10), dims=[2])], -1)
+    state_valid = state_valid[masks > 0]
+    state_masked = state_masked * state_valid.unsqueeze(-1)
+    rot_mat = rot_mat.type(torch.float32)
+    assert ((np.linalg.norm(state_masked[:, 0, :2].cpu() - np.zeros_like(state_masked[:, 0, :2].cpu()),
+                            axis=1) < 1e-4).all())
+    state_masked[:, :-1, 2:] = state_masked[:, :-1, :2] - state_masked[:, 1:, :2]
+    # assert ((np.linalg.norm(state_masked[:, 0, 2:3].cpu() - np.zeros_like(state_masked[:, 0, 2:3].cpu()),
+    #                         axis=1) < 0.1).all())
+
+    xyz_personal, maps = torch.rand(bsr), torch.rand(bsr)
+    if use_points:
+        xyz = data["roadgraph_samples/xyz"].reshape(bs, -1, 3)[:, ::4, :2].to(device)
+        xyz_personal = torch.zeros([bsr, xyz.shape[1], xyz.shape[2]], device=xyz.device, dtype=torch.float32)
+        for i, index in enumerate(masks.nonzero()):
+            # print(index)
+            xyz_personal[i] = xyz[index[0], :, :]
+        # print(cur[masks].shape)
+        xyz = xyz_personal - cur[masks][:, 0:1, :2].to(device)
+        # rot mat 2d
+        rot_mat_2d = rot2d.float()  # rot_mat[:, :2, :2]
+        # rotate xyz rot_mat_2d as float32
+        xyz_rotated = torch.bmm(xyz, rot_mat_2d.to(device))
+        # calc distance to current state
+        dist = torch.norm(xyz_rotated, dim=-1)
+        # sort by distance and save top 2000
+        _, idx = torch.sort(dist, dim=-1)
+        idx = idx[:, :2000]
+
+        xyz_personal = torch.stack([xyz_rotated[i][idx[i]] for i in range(len(idx))])
+    if use_vis:
+        try:
+            data["rgbs"] = data["rgbs"].reshape(data["rgbs"].shape[0], -1,data["rgbs"].shape[3], data["rgbs"].shape[4], data["rgbs"].shape[5])
+            data["rgbs"] = data["rgbs"][masks.nonzero(as_tuple=True)]
+            maps = data["rgbs"].permute(0, 3, 1, 2) / 255.
+        except KeyError as e:
+            raise e
+    if use_vis2:
+        try:
+            data["rgbsMy40"] = data["rgbsMy40"].reshape(data["rgbsMy40"].shape[0], -1,data["rgbsMy40"].shape[3], data["rgbsMy40"].shape[4], data["rgbsMy40"].shape[5])
+            data["rgbsMy40"] = data["rgbsMy40"][masks.nonzero(as_tuple=True)]
+            maps1 = data["rgbsMy40"].permute(0, 3, 1, 2) / 255.
+        except KeyError as e:
+            raise e
+    # cat state and type
+    state_masked = torch.cat([state_masked, agent_type[masks].to(state_masked.device)], dim=-1)
+    return masks, rot_mat, rot_mat_inv, state_masked, xyz_personal, maps, maps1
+
 def create_rot_matrix(state_masked, bbox_yaw=None):
     cur_3d = torch.ones_like(state_masked[:, 0, :3], dtype=torch.float64)
     cur_3d[:, :2] = -state_masked[:, 0, :2].clone()
