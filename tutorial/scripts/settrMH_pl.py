@@ -6,7 +6,7 @@ import os
 from scripts.dataloaders import context_description, CustomImageDataset, d_collate_fn
 from scripts.pointNet import PointNetfeat
 import torchvision.models as models
-from scripts.iab import InitEmbedding, Encoder, DecoderGoals, DecoderTraj3
+from scripts.iab import  Encoder, DecoderGoals, DecoderTraj3
 import numpy as np
 import math
 from torch.optim.lr_scheduler import LambdaLR
@@ -16,6 +16,38 @@ import pathlib
 from read_map_ds import WaymoDataset
 
 
+class InitEmbedding(nn.Module):
+    def __init__(self, inp_dim=2, out_dim=64, dr_rate=0.1, use_recurrent=False):
+        super().__init__()
+        self.layers = nn.Sequential(
+            nn.Linear(inp_dim, 32),
+            nn.ReLU(),
+            # nn.LayerNorm(8),
+            nn.Linear(32, 128),
+            nn.ReLU(),
+            nn.Dropout(dr_rate),
+            # nn.BatchNorm2d(11),
+            # nn.LayerNorm(32),
+            nn.Linear(128, out_dim)
+        )
+        self.silly_masking = False
+        self.use_recurrent = use_recurrent
+        if self.use_recurrent:
+            self.rec = nn.GRU(out_dim, out_dim, batch_first=True)
+
+    def masking(self, agent_h, agent_h_avail):
+        if self.silly_masking:
+            agent_h[agent_h_avail == 0] = -100
+        return agent_h
+
+    def forward(self, agent_h, init_state=None):
+        out = self.layers(agent_h)
+        if self.use_recurrent:
+            if init_state is not None:
+                out, hid_st = self.rec(out, init_state.unsqueeze(0))
+            if init_state is None:
+                out, hid_st = self.rec(out)
+        return out, hid_st
 
 class MAB(nn.Module):
     def __init__(self, dim_Q, dim_K, dim_V, num_heads, ln=False):
@@ -175,25 +207,26 @@ class SetTrModel(pl.LightningModule):
                 nn.ReLU(),
                 nn.Linear(512, out_modes*out_dim*80 + 6))
             for _ in range(num_heads)])
-        self.acnhors = torch.nn.Parameter(torch.randn(1,256))
-        self.ensamblingST = SetTransformer(dim_input=(out_dim*80+1), num_outputs=out_modes, dim_output=(out_dim*80+1), num_inds=64, dim_hidden=256, num_heads=4, ln=False)
+        self.acnhors = torch.nn.Parameter(torch.randn(1, 256))
+        self.ensamblingST = SetTransformer(dim_input=(out_dim*80+1), num_outputs=out_modes, dim_output=512,
+                                           num_inds=64, dim_hidden=256, num_heads=4, ln=False)
+        self.outGru = nn.GRU(512, 256, batch_first=True)
+        self.outHead = nn.Linear(256, out_dim*80 + 1)
 
     def forward(self, batch_unpacked, heads):
         masks, rot_mat, rot_mat_inv, state_masked, xyz_personal, maps = batch_unpacked
         bsr = state_masked.shape[0]
-
-#         xyz_3d = torch.cat([xyz_personal.permute(0, 2, 1),
-#                             torch.ones_like(xyz_personal.permute(0, 2, 1))[:, :1, :]], dim=1)
-#         xyz_emb, _, _ = self.pointNet(xyz_3d)
-#         xyz_emb = self.pointNetAfter(xyz_emb)
         xyz_emb = self.setTransf(xyz_personal)
         xyz_emb = self.setTransfAfter(xyz_emb)
 
-        agent_h_emb = self.embeder(state_masked)[:, -1, :]
         maps = maps[:, :3]  # .to(self.latent.device) #cuda()
         img_emb = self.visual(maps)  # .to(self.latent.device).cuda()
         # concat img_emb and agent_h_emb
         img_emb = img_emb.reshape(bsr, -1)
+        agent_h_emb, h_st = self.embeder(state_masked, img_emb)
+        agent_h_emb = agent_h_emb[:, -1]
+
+
         agent_h_emb = agent_h_emb.reshape(bsr, -1)
         anchors = self.acnhors.repeat(bsr, 1)
         concat_emb = torch.cat((img_emb, agent_h_emb, xyz_emb, anchors), 1)
@@ -202,7 +235,7 @@ class SetTrModel(pl.LightningModule):
             out = self.decoder[i](concat_emb) 
             # out shape: (bsr, out_modes*out_dim*out_horiz + 6)
             out_horiz, out_dim = 80, 2
-            prediction = out[:, :-6].view(bsr, 6, out_horiz, out_dim).permute(0,2,1,3)
+            prediction = out[:, :-6].view(bsr, 6, out_horiz, out_dim).permute(0, 2, 1, 3)
             confidence = out[:, -6:].view(bsr, 6)
             # confidences to probabilities
             confidence = confidence.softmax(dim=1) # shape: (bsr, 6)
@@ -212,12 +245,15 @@ class SetTrModel(pl.LightningModule):
         predictions = torch.cat(predictions_l, dim=2)
         confs = torch.cat(confs_l, dim=1)
         # flatten predictions and confidences
-        predictions = predictions.permute(0,2,1,3).reshape(bsr, -1, 160)
+        predictions = predictions.permute(0, 2, 1, 3).reshape(bsr, -1, 160)
         confs = confs.reshape(bsr, -1, 1)
         # concat predictions and confidences
         ens_inp = torch.cat((predictions, confs), dim=2)
+
         ens_out = self.ensamblingST(ens_inp)
-        ens_predictions = ens_out[:, :, :-1].reshape(bsr, -1, 80, 2).permute(0,2,1,3) # bs, 80, 6, 2
+        ens_out, _ = self.outGru(ens_out, h_st)
+        ens_out = self.outHead(ens_out)
+        ens_predictions = ens_out[:, :, :-1].reshape(bsr, -1, 80, 2).permute(0, 2, 1, 3) # bs, 80, 6, 2
         ens_confs = ens_out[:, :, -1]
         # make probabilites
         ens_confs = ens_confs.softmax(dim=1)
@@ -411,7 +447,8 @@ class SetTrModel(pl.LightningModule):
         index_file = pathlib.Path(ds_path) / index_file
         # join the path with the index file
         if self.use_vis:
-            train_dataset = WaymoDataset(ds_path, index_file, rgb_index_path="/home/jovyan/rendered/train/index.pkl", rgb_prefix="/home/jovyan/")
+            train_dataset = WaymoDataset(ds_path, index_file, rgb_index_path="/media/robot/hdd1/waymo_ds/rendered04may/rendered/train/index.pkl",
+                                         rgb_prefix="/media/robot/hdd1/waymo_ds/rendered04may/")
         else:
             train_dataset = WaymoDataset(ds_path, index_file)
 
