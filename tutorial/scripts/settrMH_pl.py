@@ -2,16 +2,16 @@ import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import os
+
 from scripts.dataloaders import context_description, CustomImageDataset, d_collate_fn
 from scripts.pointNet import PointNetfeat
 import torchvision.models as models
-from scripts.iab import  Encoder, DecoderGoals, DecoderTraj3
+
 import numpy as np
 import math
 from torch.optim.lr_scheduler import LambdaLR
 from scripts.train import preprocess_batch, get_future, log_likelihood
-from scripts.rgb_loader import RgbLoader
+
 import pathlib
 from read_map_ds import WaymoDataset
 
@@ -447,8 +447,8 @@ class SetTrModel(pl.LightningModule):
         index_file = pathlib.Path(ds_path) / index_file
         # join the path with the index file
         if self.use_vis:
-            train_dataset = WaymoDataset(ds_path, index_file, rgb_index_path="/media/robot/hdd1/waymo_ds/rendered04may/rendered/train/index.pkl",
-                                         rgb_prefix="/media/robot/hdd1/waymo_ds/rendered04may/")
+            train_dataset = WaymoDataset(ds_path, index_file, rgb_index_path="/home/jovyan/rendered/train/index.pkl",
+                                         rgb_prefix="/home/jovyan/")
         else:
             train_dataset = WaymoDataset(ds_path, index_file)
 
