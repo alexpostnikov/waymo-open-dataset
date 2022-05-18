@@ -171,7 +171,7 @@ class SetTrModel(pl.LightningModule):
         self.learning_rate = self.config.exp_lr
         self.batch_size = self.config.exp_batch_size
         self.decoder = torch.nn.Sequential(
-            nn.Linear(4*embed_dim, 512),
+            nn.Linear(5*embed_dim, 512),
             nn.ReLU(),
             nn.Linear(512, 512),
             nn.ReLU(),
