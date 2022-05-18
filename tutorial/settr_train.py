@@ -24,7 +24,8 @@ lr_monitor = LearningRateMonitor(logging_interval='step')
 
 # trainer = Trainer(overfit_batches=2, accelerator="gpu", max_epochs=100, devices=1)#, num_sanity_val_steps=0 
 # trainer.fit(model)
-trainer = Trainer(accelerator="gpu", callbacks=[lr_monitor], max_epochs=100, devices=-1, strategy="dp", check_val_every_n_epoch=1)#, num_sanity_val_steps=0
+trainer = Trainer(accelerator="gpu", callbacks=[lr_monitor], max_epochs=100, devices=-1, strategy="dp",
+                  check_val_every_n_epoch=1, gradient_clip_val=0.5)#, num_sanity_val_steps=0
 
 # call tune to find the lr
 # trainer.tune(model)
