@@ -311,7 +311,7 @@ class SetTrModel(pl.LightningModule):
         self.wandb_logger.log({f"ens/loss": ens_loss_nll,
                                f"ens/min_ade": ens_m_ade.item(),
                                f"ens/min_fde": ens_m_fde.item()})
-        loss = 1 * m_ades + 0.5 * loss_nlls + 0.2 * loss_goals + 0.1 * m_fdes + (1 * ens_m_ade + 0.1 * ens_m_fde + 0.7 * ens_loss_nll)
+        loss = 1 * m_ades + 0.5 * loss_nlls + 0.2 * loss_goals + 0.1 * m_fdes + 3 * (1 * ens_m_ade + 0.1 * ens_m_fde + 0.7 * ens_loss_nll + 0.2*ens_loss_goal)
 
         # my_lr = [0]
         my_lr = self.lr_schedulers().get_last_lr()
@@ -319,9 +319,9 @@ class SetTrModel(pl.LightningModule):
         self.log("train_m_ade", m_ade, prog_bar=True)
         self.log("train_m_fde", m_fde, prog_bar=True)
         if self.wandb_logger:
-            self.wandb_logger.log({"loss": loss_nll,
-                                   "min_ade": m_ade.item(),
-                                   "min_fde": m_fde.item(),
+            self.wandb_logger.log({"loss": ens_loss_nll,
+                                   "min_ade": ens_m_ade.item(),
+                                   "min_fde": ens_m_fde.item(),
                                    "lr": my_lr[0]})
 
         # x, y = batch
@@ -412,15 +412,15 @@ class SetTrModel(pl.LightningModule):
         self.wandb_logger.log({f"val/ens/loss": ens_loss_nll,
                                f"val/ens/min_ade": ens_m_ade.item(),
                                f"val/ens/min_fde": ens_m_fde.item()})
-        loss = 1 * m_ades + 0.5 * loss_nlls + 0.2 * loss_goals + 0.1 * m_fdes + (1 * ens_m_ade + 0.1 * ens_m_fde + 0.7 * ens_loss_nll)
+        loss = 1 * m_ades + 0.5 * loss_nlls + 0.2 * loss_goals + 0.1 * m_fdes + 3 * (1 * ens_m_ade + 0.1 * ens_m_fde + 0.7 * ens_loss_nll + 0.2*ens_loss_goal)
 
         # my_lr = [0]
         self.log("val_m_ade", m_ade, prog_bar=True)
         self.log("val_m_fde", m_fde, prog_bar=True)
         if self.wandb_logger:
-            self.wandb_logger.log({"val/loss": loss_nll,
-                                   "val/min_ade": m_ade.item(),
-                                   "val/min_fde": m_fde.item()})
+            self.wandb_logger.log({"val/loss": ens_loss_nll,
+                                   "val/min_ade": ens_m_ade.item(),
+                                   "val/min_fde": ens_m_fde.item()})
 
         # x, y = batch
         return loss
