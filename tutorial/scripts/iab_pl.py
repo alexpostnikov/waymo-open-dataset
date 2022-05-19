@@ -13,6 +13,7 @@ from scripts.train import preprocess_batch, get_future, log_likelihood
 from scripts.rgb_loader import RgbLoader
 import pathlib
 from read_map_ds import WaymoDataset
+import timm
 
 def get_cosine_with_hard_restarts_schedule_with_warmup_with_min(
         optimizer: torch.optim.Optimizer, num_warmup_steps: int, num_training_steps: int, num_cycles: int = 1, last_epoch: int = -1,
@@ -60,8 +61,9 @@ class AttPredictorPecNetWithTypeD3(pl.LightningModule):
             self.pointNet = PointNetfeat(global_feat=True)
         self.use_vis = use_vis = config.exp_use_vis
         if self.use_vis:
-            self.visual = models.resnet18(pretrained=True)
-            self.visual.fc = torch.nn.Linear(512, 1024)
+            # self.visual = models.resnet18(pretrained=True)
+            self.visual = timm.create_model('vit_base_patch16_224', pretrained=True).cuda()
+            self.visual.head = torch.nn.Linear(768, 1024)
         out_modes = 6
         embed_dim = config.exp_embed_dim
         use_rec = config.exp_use_rec
