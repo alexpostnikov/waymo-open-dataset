@@ -429,8 +429,24 @@ def pytorch_neg_multi_log_likelihood_batch(data, logits, confidences, use_every_
 
     return torch.mean(error)
 
+def rotate_neighbours(poses_b: torch.Tensor, rot_mat: torch.Tensor, masks: torch.Tensor):
+    '''
+    Rotates the neighbours of each pedestrian by the given rotation matrix.
+    :param poses_b: (batch_size, num_peds,  11, 2)
+    :param rot_mat: (batch_size_real, 3, 3)
+    :param masks: (batch_size, num_peds)
+    :return: (batch_size_real, num_peds, 11, 2)
+    '''
 
-def preprocess_batch(data, use_points=False, use_vis=False):
+    batch_size, num_peds, _, _ = poses_b.shape
+    batch_size_real = masks.sum().item()
+    out = torch.zeros((batch_size_real, num_peds, 11, 2)).to(poses_b.device)
+    for i, index in enumerate(masks.nonzero()):
+        out[i, :, :, :] = torch.bmm(poses_b[index[0]].reshape(1,-1, 2) - poses_b[index[0], index[1], 0].reshape(1, 1, 2), rot_mat[i:i+1, :2, :2].float()).reshape(128,11,2)
+    return out
+
+
+def preprocess_batch(data, use_points=False, use_vis=False, use_neighbours=False):
     bs = data["state/tracks_to_predict"].shape[0]
     masks = data["state/tracks_to_predict"].reshape(-1, 128) > 0
     bsr = masks.sum()  # num peds to predict, bs real
@@ -441,12 +457,17 @@ def preprocess_batch(data, use_points=False, use_vis=False):
     agent_type = data["state/type"].reshape(-1, 128, 1, 1).repeat(1, 1, 11, 1)
     past = torch.cat([data["state/past/x"].reshape(-1, 128, 10, 1), data["state/past/y"].reshape(-1, 128, 10, 1)],
                      -1)  # .permute(0, 2, 1, 3)
-    poses = torch.cat([cur, torch.flip(past, dims=[2])], dim=2).reshape(bs * 128, 11, -1)
+    poses_b = torch.cat([cur, torch.flip(past, dims=[2])], dim=2).reshape(bs,  128, 11, -1)
+    poses = poses_b.reshape(bs*128, -1)
     velocities = torch.zeros_like(poses)
     velocities[:, :-1] = poses[:, :-1] - poses[:, 1:]
     state = torch.cat([poses, velocities], dim=-1)
     state_masked = state.reshape(bs, 128, 11, -1)[masks]
     rot_mat, rot2d = create_rot_matrix(state_masked, data["state/current/bbox_yaw"][masks])
+    if use_neighbours:
+        rotate_neighbours_b = rotate_neighbours(poses_b, rot_mat, masks)
+    #torch.bmm(poses_b.reshape(4 * 128 * 11, 1, 2), torch.eye(2).unsqueeze(0).repeat(4 * 128 * 11, 1, 1).cuda()).reshape(
+    #    4, 128, 11, -1).shape
     rot_mat_inv = torch.inverse(rot_mat).type(torch.float32)
     ### rotate cur state
     state_expanded = torch.cat([state_masked[:, :, :2], torch.ones_like(state_masked[:, :, :1])], -1)
@@ -493,10 +514,12 @@ def preprocess_batch(data, use_points=False, use_vis=False):
             raise e
     # cat state and type
     state_masked = torch.cat([state_masked, agent_type[masks].to(state_masked.device)], dim=-1)
+    if use_neighbours:
+        return state_masked, state_valid, rot_mat, rot_mat_inv, xyz_personal, maps, rotate_neighbours_b
     return masks, rot_mat, rot_mat_inv, state_masked, xyz_personal, maps
 
 
-def preprocess_batch2vis(data, use_points=False, use_vis=False, use_vis2=False):
+def preprocess_batch2vis(data, use_points=False, use_vis=False, use_vis2=False, use_neighbours=False):
     bs = data["state/tracks_to_predict"].shape[0]
     masks = data["state/tracks_to_predict"].reshape(-1, 128) > 0
     bsr = masks.sum()  # num peds to predict, bs real
@@ -507,13 +530,16 @@ def preprocess_batch2vis(data, use_points=False, use_vis=False, use_vis2=False):
     agent_type = data["state/type"].reshape(-1, 128, 1, 1).repeat(1, 1, 11, 1)
     past = torch.cat([data["state/past/x"].reshape(-1, 128, 10, 1), data["state/past/y"].reshape(-1, 128, 10, 1)],
                      -1)  # .permute(0, 2, 1, 3)
-    poses = torch.cat([cur, torch.flip(past, dims=[2])], dim=2).reshape(bs * 128, 11, -1)
+    poses_b = torch.cat([cur, torch.flip(past, dims=[2])], dim=2).reshape(bs,128, 11, -1)
+    poses = poses_b.reshape(-1, 11, 2)
     velocities = torch.zeros_like(poses)
     velocities[:, :-1] = poses[:, :-1] - poses[:, 1:]
     state = torch.cat([poses, velocities], dim=-1)
     state_masked = state.reshape(bs, 128, 11, -1)[masks]
     rot_mat, rot2d = create_rot_matrix(state_masked, data["state/current/bbox_yaw"][masks])
     rot_mat_inv = torch.inverse(rot_mat).type(torch.float32)
+    if use_neighbours:
+        rotate_neighbours_b = rotate_neighbours(poses_b, rot_mat, masks)
     ### rotate cur state
     state_expanded = torch.cat([state_masked[:, :, :2], torch.ones_like(state_masked[:, :, :1])], -1)
     state_masked[:, :, :2] = torch.bmm(rot_mat, state_expanded.permute(0, 2, 1).type(torch.float64)).permute(0, 2,
@@ -552,7 +578,7 @@ def preprocess_batch2vis(data, use_points=False, use_vis=False, use_vis2=False):
         xyz_personal = torch.stack([xyz_rotated[i][idx[i]] for i in range(len(idx))])
     if use_vis:
         try:
-            data["rgbs"] = data["rgbs"].reshape(data["rgbs"].shape[0], -1,data["rgbs"].shape[3], data["rgbs"].shape[4], data["rgbs"].shape[5])
+            data["rgbs"] = data["rgbs"].reshape(data["rgbs"].shape[0], -1, data["rgbs"].shape[3], data["rgbs"].shape[4], data["rgbs"].shape[5])
             data["rgbs"] = data["rgbs"][masks.nonzero(as_tuple=True)]
             maps = data["rgbs"].permute(0, 3, 1, 2) / 255.
         except KeyError as e:
@@ -566,6 +592,8 @@ def preprocess_batch2vis(data, use_points=False, use_vis=False, use_vis2=False):
             raise e
     # cat state and type
     state_masked = torch.cat([state_masked, agent_type[masks].to(state_masked.device)], dim=-1)
+    if use_neighbours:
+        return state_masked, state_valid, rot_mat, rot_mat_inv, xyz_personal, maps, maps1, rotate_neighbours_b
     return masks, rot_mat, rot_mat_inv, state_masked, xyz_personal, maps, maps1
 
 def create_rot_matrix(state_masked, bbox_yaw=None):
