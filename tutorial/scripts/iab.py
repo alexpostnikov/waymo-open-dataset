@@ -330,10 +330,10 @@ class DecoderTraj3(nn.Module):
         self.out_shape = out_shape
 
         self.outlayers = nn.Sequential(
-            nn.Linear(512, out_shape * 4),
+            nn.Linear(512, out_shape),
             nn.ReLU(),
 
-            nn.Linear(out_shape * 4, out_shape * 2),
+            nn.Linear(out_shape, out_shape * 2),
             nn.ReLU(),
             nn.Dropout(dr_rate),
             nn.LayerNorm(out_shape * 2),
