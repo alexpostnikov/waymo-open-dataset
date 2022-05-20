@@ -515,7 +515,7 @@ def preprocess_batch(data, use_points=False, use_vis=False, use_neighbours=False
     # cat state and type
     state_masked = torch.cat([state_masked, agent_type[masks].to(state_masked.device)], dim=-1)
     if use_neighbours:
-        return state_masked, state_valid, rot_mat, rot_mat_inv, xyz_personal, maps, rotate_neighbours_b
+        return masks, rot_mat, rot_mat_inv, state_masked, xyz_personal, maps, rotate_neighbours_b
     return masks, rot_mat, rot_mat_inv, state_masked, xyz_personal, maps
 
 
@@ -593,7 +593,7 @@ def preprocess_batch2vis(data, use_points=False, use_vis=False, use_vis2=False, 
     # cat state and type
     state_masked = torch.cat([state_masked, agent_type[masks].to(state_masked.device)], dim=-1)
     if use_neighbours:
-        return state_masked, state_valid, rot_mat, rot_mat_inv, xyz_personal, maps, maps1, rotate_neighbours_b
+        return masks, rot_mat, rot_mat_inv, state_masked, xyz_personal, maps, maps1, rotate_neighbours_b
     return masks, rot_mat, rot_mat_inv, state_masked, xyz_personal, maps, maps1
 
 def create_rot_matrix(state_masked, bbox_yaw=None):
