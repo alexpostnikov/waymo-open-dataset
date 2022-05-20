@@ -259,10 +259,10 @@ class SetTrModel(pl.LightningModule):
 
 
         poses, confs, goals_local, rot_mat, rot_mat_inv = self(batch_unpacked)
-        loss_goals, loss_nll, m_ade, m_fde = self.get_losses(batch, confs, goals_local, poses, rot_mat,
+        loss_goals, loss_nll, m_ade, m_fde, mean_ade = self.get_losses(batch, confs, goals_local, poses, rot_mat,
                                                              use_every_nth_prediction)
 
-        loss = 1 * m_ade + 0.5 * loss_nll + 0.2 * loss_goals + 0.1 * m_fde
+        loss = 0.2 * m_ade + 0.5 * loss_nll + 0.2 * loss_goals + 0.1 * m_fde + 5 * mean_ade
 
         # my_lr = [0]
         my_lr = self.lr_schedulers().get_last_lr()
@@ -293,6 +293,7 @@ class SetTrModel(pl.LightningModule):
         # print((torch.norm((fut_path.unsqueeze(2) - poses), dim=-1)).shape)
         m_ades = (torch.norm((fut_path.unsqueeze(2) - poses), dim=-1) * valid.unsqueeze(2))[:, selector].mean(1).min(
             -1).values.mean()
+        mean_ades = (torch.norm((fut_path.unsqueeze(2) - poses), dim=-1) * valid.unsqueeze(2))[:, selector].mean()
         m_fdes = (torch.norm((fut_path[:, -1].unsqueeze(1) - goals_local.reshape(-1, 6, 2)), dim=-1) * valid[:,
                                                                                                        -1].unsqueeze(
             1)).min(
@@ -310,7 +311,7 @@ class SetTrModel(pl.LightningModule):
         goals_masked = (valid.unsqueeze(2).unsqueeze(2)[:, -1] * goals_local.reshape(-1, 6, 2))
         loss_goals = -log_likelihood(fut_path_masked[:, -1:], goals_masked.unsqueeze(1), confs).mean()
         m_ade = m_ades.mean()
-        return loss_goals, loss_nll, m_ade, m_fde
+        return loss_goals, loss_nll, m_ade, m_fde, mean_ades
 
     def validation_step(self, batch, batch_idx):
         use_every_nth_prediction = 1
@@ -318,7 +319,7 @@ class SetTrModel(pl.LightningModule):
         batch_unpacked = preprocess_batch2vis(batch, 1, self.use_vis, 1)
 
         poses, confs, goals_local, rot_mat, rot_mat_inv = self(batch_unpacked)
-        loss_goals, loss_nll, m_ade, m_fde = self.get_losses(batch, confs, goals_local, poses, rot_mat,
+        loss_goals, loss_nll, m_ade, m_fde, _ = self.get_losses(batch, confs, goals_local, poses, rot_mat,
                                                              use_every_nth_prediction)
 
         loss = 0.01 * m_ade + 1 * loss_nll + 1 * loss_goals + 0.1 * m_fde
