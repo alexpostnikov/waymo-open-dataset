@@ -225,21 +225,23 @@ class PoseEncoderBlock(nn.Module):
         self.use_segm = use_segm
         self.sat = SelfAttention(inp_dim, embed_dim, dr_rate=dr_rate)
         self.pat = PoseAttention(inp_dim, embed_dim, data_dim=inp_dim, dr_rate=dr_rate)
-        if use_vis:
-            self.va = VisualAttentionTransformer(inp_dim, embed_dim, dr_rate=dr_rate)
+        self.va = VisualAttentionTransformer(inp_dim, embed_dim, dr_rate=dr_rate)
+        self.va1 = VisualAttentionTransformer(inp_dim, embed_dim, dr_rate=dr_rate)
         if use_points:
             self.pa = VisualAttentionTransformer(inp_dim, embed_dim, dr_rate=dr_rate)
+        self.na = PoseAttention(inp_dim, embed_dim, data_dim=inp_dim, dr_rate=dr_rate)
 
-    def forward(self, x, image_emb, agent_h_emb, points_emb):
+    def forward(self, x, image_emb, agent_h_emb, points_emb, image_emb1, neighbor_emb):
 
         x = x + self.pat(x, agent_h_emb)
 
         if self.use_vis:
             x = x + self.va(image_emb, x)
+            x = x + self.va(image_emb1, x)
 
         if self.use_points:
             x = x + self.pa(points_emb, x)
-
+        x = x + self.na(x, neighbor_emb)
         # x = x + self.sat(x, None)
         x = self.sat(x, None)
         return x
@@ -252,9 +254,9 @@ class Encoder(nn.Module):
             [PoseEncoderBlock(inp_dim, embed_dim, use_vis=use_vis, use_points=use_points, dr_rate=dr_rate) for _ in
              range(num_blocks)])
 
-    def forward(self, x, image_emb, agent_h_emb, points_emb):
+    def forward(self, x, image_emb, agent_h_emb, points_emb, image_emb1, neighbor_emb):
         for pose_encoder in self.layers:
-            x = pose_encoder(x, image_emb, agent_h_emb, points_emb)
+            x = pose_encoder(x, image_emb, agent_h_emb, points_emb, image_emb1, neighbor_emb)
         return x
 
 
@@ -358,7 +360,6 @@ class DecoderTraj3(nn.Module):
         inp = torch.cat((hist_enc, goal_embedded), dim=2)
         inp = time_encoding_sin(inp, added_emb_dim=32)
         agent_h_te = self.q_mlp(inp)
-
 
         predictions = self.transformer_encoder(agent_h_te.permute(1, 0, 2)).permute(1, 0, 2)
         predictions = self.outlayers(predictions)
