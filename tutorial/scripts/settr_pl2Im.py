@@ -193,7 +193,7 @@ class SetTrModel(pl.LightningModule):
         agent_h_emb = self.embeder(state_masked)[:, -1, :]
         maps = maps[:, :3]  # .to(self.latent.device) #cuda()
         img_emb = self.visual(maps)  # .to(self.latent.device).cuda()
-        img_emb1 = self.visual(maps1)
+        img_emb1 = self.visual1(maps1)
         # concat img_emb and agent_h_emb
         img_emb = img_emb.reshape(bsr, -1)
         agent_h_emb = agent_h_emb.reshape(bsr, -1)
@@ -372,7 +372,7 @@ class SetTrModel(pl.LightningModule):
         return train_loader
 
     def val_dataloader(self):
-        return None
+#         return None
         ds_path = self.config.dir_data
         index_file = "val_mapstyle/index_file.txt"
         # join
@@ -380,8 +380,11 @@ class SetTrModel(pl.LightningModule):
         # join the path with the index file
 
         if self.use_vis:
-            val_dataset = WaymoDataset(ds_path, index_file, rgb_index_path="/home/jovyan/rendered/val/index.pkl",
-                                       rgb_prefix="/home/jovyan/")
+            val_dataset = WaymoDataset(ds_path, index_file, 
+                                       rgb_index_path="/home/jovyan/rendered/val/index.pkl",
+                                       rgb_prefix="/home/jovyan/",
+                                       rgb_index_path1="/home/jovyan/waymo-open-dataset/tutorial/renderedMy40val/index.pkl", 
+                                       rgb_prefix1="/home/jovyan/waymo-open-dataset/tutorial/")
         else:
             val_dataset = WaymoDataset(ds_path, index_file)
 
